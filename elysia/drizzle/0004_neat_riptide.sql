@@ -1,0 +1,1 @@
+ALTER TABLE "match" ADD COLUMN "tracking_data" jsonb;

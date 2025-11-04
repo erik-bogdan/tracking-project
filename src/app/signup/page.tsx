@@ -4,18 +4,21 @@ import { useForm } from "react-hook-form";
 import { motion } from "framer-motion";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
-import Link from "next/link";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
-import { signInEmail, fetchSession, clearError } from "@/lib/slices/authSlice";
+import { signUpEmail, fetchSession, clearError } from "@/lib/slices/authSlice";
 
-type LoginFormData = {
+type SignupFormData = {
+  fullName: string;
   email: string;
   password: string;
+  confirmPassword: string;
+  organizationName: string;
 };
 
 const containerVariants = {
@@ -23,7 +26,7 @@ const containerVariants = {
   visible: {
     opacity: 1,
     transition: {
-      staggerChildren: 0.2,
+      staggerChildren: 0.15,
       delayChildren: 0.1,
     },
   },
@@ -36,10 +39,10 @@ const itemVariants = {
     y: 0,
     transition: {
       duration: 0.5,
-      ease: [0.6, -0.05, 0.01, 0.99] as const,
+      ease: [0.6, -0.05, 0.01, 0.99],
     },
   },
-} as const;
+};
 
 const glowVariants = {
   animate: {
@@ -52,7 +55,7 @@ const glowVariants = {
   },
 };
 
-export default function LoginPage() {
+export default function SignupPage() {
   const router = useRouter();
   const dispatch = useAppDispatch();
   const { isLoading, error } = useAppSelector((state) => state.auth);
@@ -73,20 +76,30 @@ export default function LoginPage() {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<LoginFormData>();
+    watch,
+  } = useForm<SignupFormData>();
 
-  const onSubmit = async (data: LoginFormData) => {
+  const password = watch("password");
+
+  const onSubmit = async (data: SignupFormData) => {
     dispatch(clearError());
-    const result = await dispatch(signInEmail({ email: data.email, password: data.password }));
-    
-    if (signInEmail.fulfilled.match(result)) {
+    const result = await dispatch(
+      signUpEmail({
+        email: data.email,
+        password: data.password,
+        name: data.fullName,
+        organizationName: data.organizationName,
+      })
+    );
+
+    if (signUpEmail.fulfilled.match(result)) {
       // Redirect on success
       router.push("/dashboard"); // or wherever you want to redirect
     }
   };
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center overflow-hidden">
+    <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-black">
       {/* Animated background glow with neon red */}
       <motion.div
         className="absolute inset-0 opacity-40"
@@ -155,7 +168,7 @@ export default function LoginPage() {
             animate={{ opacity: 1 }}
             transition={{ delay: 0.4 }}
           >
-            Track your games and stream with OBS integration
+            Create your account to start tracking
           </motion.p>
         </motion.div>
 
@@ -163,14 +176,45 @@ export default function LoginPage() {
           <Card className="bg-[#0a0a0a] border-[#ff073a]/30 backdrop-blur-sm shadow-2xl shadow-[#ff073a]/10">
             <CardHeader className="space-y-1 pb-4">
               <CardTitle className="text-2xl font-semibold text-white">
-                Sign In
+                Create Account
               </CardTitle>
               <CardDescription className="text-white/60">
-                Enter your credentials to continue
+                Fill in your information to get started
               </CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+                <motion.div
+                  variants={itemVariants}
+                  className="space-y-2"
+                >
+                  <Label htmlFor="fullName" className="text-white/90">
+                    Full Name
+                  </Label>
+                  <Input
+                    id="fullName"
+                    type="text"
+                    placeholder="John Doe"
+                    className="bg-white/5 border-[#ff073a]/30 text-white placeholder:text-white/40 focus:border-[#ff073a] focus:ring-[#ff073a]/30 transition-all"
+                    {...register("fullName", {
+                      required: "Full name is required",
+                      minLength: {
+                        value: 2,
+                        message: "Full name must be at least 2 characters",
+                      },
+                    })}
+                  />
+                  {errors.fullName && (
+                    <motion.p
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-sm text-[#ff4569]"
+                    >
+                      {errors.fullName.message}
+                    </motion.p>
+                  )}
+                </motion.div>
+
                 <motion.div
                   variants={itemVariants}
                   className="space-y-2"
@@ -215,6 +259,37 @@ export default function LoginPage() {
                   variants={itemVariants}
                   className="space-y-2"
                 >
+                  <Label htmlFor="organizationName" className="text-white/90">
+                    Organization Name
+                  </Label>
+                  <Input
+                    id="organizationName"
+                    type="text"
+                    placeholder="My Organization"
+                    className="bg-white/5 border-[#ff073a]/30 text-white placeholder:text-white/40 focus:border-[#ff073a] focus:ring-[#ff073a]/30 transition-all"
+                    {...register("organizationName", {
+                      required: "Organization name is required",
+                      minLength: {
+                        value: 2,
+                        message: "Organization name must be at least 2 characters",
+                      },
+                    })}
+                  />
+                  {errors.organizationName && (
+                    <motion.p
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-sm text-[#ff4569]"
+                    >
+                      {errors.organizationName.message}
+                    </motion.p>
+                  )}
+                </motion.div>
+
+                <motion.div
+                  variants={itemVariants}
+                  className="space-y-2"
+                >
                   <Label htmlFor="password" className="text-white/90">
                     Password
                   </Label>
@@ -242,6 +317,35 @@ export default function LoginPage() {
                   )}
                 </motion.div>
 
+                <motion.div
+                  variants={itemVariants}
+                  className="space-y-2"
+                >
+                  <Label htmlFor="confirmPassword" className="text-white/90">
+                    Confirm Password
+                  </Label>
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    placeholder="••••••••"
+                    className="bg-white/5 border-[#ff073a]/30 text-white placeholder:text-white/40 focus:border-[#ff073a] focus:ring-[#ff073a]/30 transition-all"
+                    {...register("confirmPassword", {
+                      required: "Please confirm your password",
+                      validate: (value) =>
+                        value === password || "Passwords do not match",
+                    })}
+                  />
+                  {errors.confirmPassword && (
+                    <motion.p
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-sm text-[#ff4569]"
+                    >
+                      {errors.confirmPassword.message}
+                    </motion.p>
+                  )}
+                </motion.div>
+
                 <motion.div variants={itemVariants} className="pt-2">
                   <Button
                     type="submit"
@@ -251,10 +355,10 @@ export default function LoginPage() {
                     {isLoading ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Signing in...
+                        Creating account...
                       </>
                     ) : (
-                      "Sign In"
+                      "Create Account"
                     )}
                   </Button>
                 </motion.div>
@@ -268,12 +372,12 @@ export default function LoginPage() {
           className="mt-6 text-center"
         >
           <p className="text-sm text-white/50">
-            Don't have an account?{" "}
+            Already have an account?{" "}
             <Link
-              href="/signup"
+              href="/"
               className="text-[#ff073a] hover:text-[#ff1744] underline underline-offset-4 transition-colors font-medium"
             >
-              Sign up here
+              Sign in here
             </Link>
           </p>
         </motion.div>
@@ -281,3 +385,4 @@ export default function LoginPage() {
     </div>
   );
 }
+
