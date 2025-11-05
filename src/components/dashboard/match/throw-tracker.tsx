@@ -10,6 +10,7 @@ interface ThrowTrackerProps {
   awayPlayers: string[];
   matchType: MatchType;
   matchId?: string;
+  bestOf?: number; // Best Of number (e.g., 7 for BO7)
   onStateChange?: (state: any) => void;
   className?: string;
 }
@@ -33,6 +34,7 @@ export function ThrowTracker({
   awayPlayers, 
   matchType, 
   matchId, 
+  bestOf,
   onStateChange, 
   className 
 }: ThrowTrackerProps) {
@@ -58,6 +60,7 @@ export function ThrowTracker({
         homePlayers={homePlayersObj}
         awayPlayers={awayPlayersObj}
         matchId={matchId}
+        bestOf={bestOf}
         onStateChange={onStateChange}
         className={className}
       />

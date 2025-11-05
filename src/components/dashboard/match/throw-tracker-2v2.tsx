@@ -15,11 +15,13 @@ interface ThrowTracker2v2Props {
   homePlayers: Player[];
   awayPlayers: Player[];
   matchId?: string;
+  bestOf?: number; // Best Of number (e.g., 7 for BO7)
   onStateChange?: (state: any) => void;
   className?: string;
 }
 
 interface GameState {
+  // Current game state
   homeScore: number;
   awayScore: number;
   currentTurn: 'home' | 'away';
@@ -46,6 +48,12 @@ interface GameState {
   otAway?: number;
   overtimePeriod?: number;
   lastOvertimeThrower?: string | null;
+  // Match state (multiple games)
+  currentGame: number; // Current game number (1, 2, 3, ...)
+  matchWins: { home: number; away: number }; // Wins per team
+  matchHistory: Array<{ gameNumber: number; winner: 'home' | 'away' | null; startingTeam: 'home' | 'away' }>; // History of completed games
+  waitingForStartingTeam?: boolean; // If true, show starting team selection
+  matchEnded?: boolean; // True when match is complete (someone reached required wins)
 }
 
 interface GameAction {
@@ -118,7 +126,7 @@ function calculateScoreUpTo(throws: ThrowRecord[], upToIndex: number): { home: n
   return { home: homeScore, away: awayScore };
 }
 
-export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, onStateChange, className }: ThrowTracker2v2Props) {
+export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1, onStateChange, className }: ThrowTracker2v2Props) {
   const [isInitialized, setIsInitialized] = useState(false);
   const [gameState, setGameState] = useState<GameState>({
     homeScore: 0,
@@ -139,8 +147,16 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, onStateChan
     otHome: 0,
     otAway: 0,
     overtimePeriod: 0,
-    lastOvertimeThrower: null
+    lastOvertimeThrower: null,
+    currentGame: 1,
+    matchWins: { home: 0, away: 0 },
+    matchHistory: [],
+    waitingForStartingTeam: true,
+    matchEnded: false
   });
+
+  // Calculate wins needed
+  const winsNeeded = Math.ceil(bestOf / 2);
 
   const localStorageKey = matchId ? `match-2v2-${matchId}` : null;
 
@@ -214,7 +230,92 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, onStateChan
     return players.find(p => p.id === playerId)?.label || playerId;
   }, [homePlayers, awayPlayers]);
 
+  // Handle starting team selection
+  const handleSelectStartingTeam = (startingTeam: 'home' | 'away') => {
+    setGameState(prev => {
+      // Save starting team to match history if this is a new game
+      const currentGameHistory = prev.matchHistory.find(g => g.gameNumber === prev.currentGame);
+      const updatedMatchHistory = currentGameHistory 
+        ? prev.matchHistory 
+        : [
+            ...prev.matchHistory,
+            {
+              gameNumber: prev.currentGame,
+              winner: null,
+              startingTeam
+            }
+          ];
+      
+      return {
+        ...prev,
+        waitingForStartingTeam: false,
+        currentTurn: startingTeam,
+        initThrowsCount: 0,
+        matchHistory: updatedMatchHistory
+      };
+    });
+  };
+
+  // Handle next match (start new game)
+  const handleNextMatch = () => {
+    setGameState(prev => {
+      const nextGame = prev.currentGame + 1;
+      // Determine who should start next (alternate from previous game)
+      const lastGame = prev.matchHistory[prev.matchHistory.length - 1];
+      const nextStartingTeam = lastGame?.startingTeam === 'home' ? 'away' : 'home';
+      
+      return {
+        ...prev,
+        currentGame: nextGame,
+        waitingForStartingTeam: true,
+        // Reset game state
+        homeScore: 0,
+        awayScore: 0,
+        currentTurn: nextStartingTeam,
+        phase: 'regular',
+        lastThrower: null,
+        consecutiveThrows: 0,
+        returnServeCount: 0,
+        gameHistory: [],
+        initThrowsCount: 0,
+        throwsInTurn: 0,
+        hitsInTurn: 0,
+        rebuttalCupsToMake: undefined,
+        rebuttalMode: undefined,
+        rebuttalStep: 0,
+        rebuttalAttemptsLeft: undefined,
+        rebuttalLastShooter: null,
+        exitTeam: undefined,
+        gameEnded: false,
+        otHome: 0,
+        otAway: 0,
+        overtimePeriod: 0,
+        lastOvertimeThrower: null
+      };
+    });
+  };
+
+  // Check if game is won and update match wins
+  const checkGameWin = useCallback((homeScore: number, awayScore: number, phase: string, otHome: number, otAway: number, gameEnded: boolean) => {
+    if (!gameEnded) return null;
+    
+    // Determine winner based on final score
+    const finalHomeScore = phase === 'overtime' ? (homeScore + (otHome ?? 0)) : homeScore;
+    const finalAwayScore = phase === 'overtime' ? (awayScore + (otAway ?? 0)) : awayScore;
+    
+    if (finalHomeScore > finalAwayScore) {
+      return 'home';
+    } else if (finalAwayScore > finalHomeScore) {
+      return 'away';
+    }
+    return null;
+  }, []);
+
   const handleThrow = (type: 'hit' | 'miss', playerId: string) => {
+    // Don't allow throws if waiting for starting team selection
+    if (gameState.waitingForStartingTeam) return;
+    // Don't allow throws if match ended
+    if (gameState.matchEnded) return;
     const team = gameState.currentTurn;
     const isHome = team === 'home';
     
@@ -246,7 +347,7 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, onStateChan
       let newOvertimePeriod = prev.overtimePeriod ?? 0;
       let newLastOvertimeThrower = prev.lastOvertimeThrower || null;
 
-      // Starting sequence
+      // Starting sequence - starting team gets only 1 throw, then opponent comes with normal turn
       if (prev.phase === 'regular' && newInitThrows === 0) {
         if (type === 'hit') {
           if (isHome) newHomeScore++; else newAwayScore++;
@@ -256,7 +357,11 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, onStateChan
         newThrowsInTurn = 0;
         newHitsInTurn = 0;
         newInitThrows = 1;
-        newCurrentTurn = 'away';
+        // Switch to opponent - they will play with normal turn (2-3 throws)
+        newCurrentTurn = isHome ? 'away' : 'home';
+        // Reset turn counters for the opponent's normal turn
+        newThrowsInTurn = 0;
+        newHitsInTurn = 0;
       } else {
         // Return serve handling
         if (prev.phase === 'return_serve') {
@@ -498,6 +603,40 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, onStateChan
         newPhase = 'overtime';
       }
 
+      // Check if game ended and determine winner
+      let updatedMatchWins = prev.matchWins;
+      let updatedMatchHistory = prev.matchHistory;
+      let updatedMatchEnded = prev.matchEnded;
+      
+      if (newGameEnded && !prev.gameEnded) {
+        // Game just ended, determine winner
+        const winner = checkGameWin(newHomeScore, newAwayScore, newPhase, newOtHome, newOtAway, newGameEnded);
+        
+        if (winner) {
+          // Update match wins
+          updatedMatchWins = {
+            home: winner === 'home' ? prev.matchWins.home + 1 : prev.matchWins.home,
+            away: winner === 'away' ? prev.matchWins.away + 1 : prev.matchWins.away
+          };
+          
+          // Add to match history
+          const lastGame = prev.matchHistory.find(g => g.gameNumber === prev.currentGame);
+          updatedMatchHistory = [
+            ...prev.matchHistory.filter(g => g.gameNumber !== prev.currentGame),
+            {
+              gameNumber: prev.currentGame,
+              winner,
+              startingTeam: lastGame?.startingTeam || prev.currentTurn
+            }
+          ];
+          
+          // Check if match is complete
+          if (updatedMatchWins.home >= winsNeeded || updatedMatchWins.away >= winsNeeded) {
+            updatedMatchEnded = true;
+          }
+        }
+      }
+
       return {
         ...prev,
         homeScore: newHomeScore,
@@ -519,7 +658,10 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, onStateChan
         otHome: newOtHome,
         otAway: newOtAway,
         overtimePeriod: newOvertimePeriod,
-        lastOvertimeThrower: newLastOvertimeThrower
+        lastOvertimeThrower: newLastOvertimeThrower,
+        matchWins: updatedMatchWins,
+        matchHistory: updatedMatchHistory,
+        matchEnded: updatedMatchEnded
       };
     });
   };
@@ -875,7 +1017,7 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, onStateChan
       
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-white text-center flex-1">Throw Tracker (2v2)</h3>
-        {gameState.gameHistory.length > 0 && (
+        {gameState.gameHistory.length > 0 && !gameState.waitingForStartingTeam && !gameState.gameEnded && !gameState.matchEnded && (
           <Button
             onClick={undoLastAction}
             variant="ghost"
@@ -888,22 +1030,92 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, onStateChan
         )}
       </div>
 
-      {/* Score display */}
-      <div className="mb-4 text-center">
-        <div className="text-white/70 text-sm">
-          {gameState.phase === 'overtime' 
-            ? `Overtime (${gameState.overtimePeriod || 0}) - Home: ${gameState.homeScore + (gameState.otHome ?? 0)}, Away: ${gameState.awayScore + (gameState.otAway ?? 0)}`
-            : `Home: ${gameState.homeScore} - Away: ${gameState.awayScore}`}
-        </div>
-        {gameState.phase === 'return_serve' && (
-          <div className="text-[#ff073a] text-sm mt-1">
-            Return Serve: {gameState.returnServeCount} cups remaining
+      {/* Match wins display */}
+      {bestOf > 1 && (
+        <div className="mb-4 text-center">
+          <div className="text-white/90 text-lg font-semibold mb-1">
+            Match: {gameState.matchWins.home} - {gameState.matchWins.away} (Best of {bestOf})
           </div>
-        )}
-      </div>
+          <div className="text-white/60 text-xs">
+            Game {gameState.currentGame} - {winsNeeded} {winsNeeded === 1 ? 'win' : 'wins'} needed
+          </div>
+        </div>
+      )}
+
+      {/* Match ended message */}
+      {gameState.matchEnded && (
+        <div className="mb-4 p-4 bg-[#ff073a]/20 border border-[#ff073a]/50 rounded-lg text-center">
+          <div className="text-white text-xl font-bold mb-2">
+            Match Complete!
+          </div>
+          <div className="text-white/90 text-lg">
+            {gameState.matchWins.home > gameState.matchWins.away ? 'Home Team' : 'Away Team'} wins the match!
+          </div>
+        </div>
+      )}
+
+      {/* Starting team selection */}
+      {gameState.waitingForStartingTeam && !gameState.matchEnded && (
+        <div className="mb-6 p-6 bg-white/5 border border-white/20 rounded-lg">
+          <div className="text-white text-center mb-4 text-lg font-semibold">
+            Game {gameState.currentGame} - Select Starting Team
+          </div>
+          <div className="flex gap-4">
+            <Button
+              onClick={() => handleSelectStartingTeam('home')}
+              className="flex-1 bg-gradient-to-r from-[#ff073a] to-[#ff1744] text-white hover:from-[#ff1744] hover:to-[#ff4569] py-6 text-lg font-bold"
+            >
+              Home Team Starts
+            </Button>
+            <Button
+              onClick={() => handleSelectStartingTeam('away')}
+              className="flex-1 bg-gradient-to-r from-[#ff073a] to-[#ff1744] text-white hover:from-[#ff1744] hover:to-[#ff4569] py-6 text-lg font-bold"
+            >
+              Away Team Starts
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Next Match button */}
+      {gameState.gameEnded && !gameState.matchEnded && bestOf > 1 && (
+        <div className="mb-6 p-4 bg-white/5 border border-white/20 rounded-lg text-center">
+          <div className="text-white mb-3">
+            Game {gameState.currentGame} Complete!
+            {gameState.matchHistory.length > 0 && (
+              <span className="ml-2 text-white/70">
+                ({gameState.matchHistory[gameState.matchHistory.length - 1]?.winner === 'home' ? 'Home' : 'Away'} won)
+              </span>
+            )}
+          </div>
+          <Button
+            onClick={handleNextMatch}
+            className="bg-gradient-to-r from-[#ff073a] to-[#ff1744] text-white hover:from-[#ff1744] hover:to-[#ff4569] px-8 py-3 text-lg font-bold"
+          >
+            Next Match
+          </Button>
+        </div>
+      )}
+
+      {/* Score display */}
+      {!gameState.waitingForStartingTeam && !gameState.matchEnded && (
+        <div className="mb-4 text-center">
+          <div className="text-white/70 text-sm">
+            {gameState.phase === 'overtime' 
+              ? `Overtime (${gameState.overtimePeriod || 0}) - Home: ${gameState.homeScore + (gameState.otHome ?? 0)}, Away: ${gameState.awayScore + (gameState.otAway ?? 0)}`
+              : `Home: ${gameState.homeScore} - Away: ${gameState.awayScore}`}
+          </div>
+          {gameState.phase === 'return_serve' && (
+            <div className="text-[#ff073a] text-sm mt-1">
+              Return Serve: {gameState.returnServeCount} cups remaining
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Player buttons */}
-      <div className="flex flex-col md:flex-row md:justify-between items-stretch md:items-start mb-6 gap-4">
+      {!gameState.waitingForStartingTeam && !gameState.gameEnded && !gameState.matchEnded && (
+        <div className="flex flex-col md:flex-row md:justify-between items-stretch md:items-start mb-6 gap-4">
         {/* Left side - 2 buttons (GREEN - for hits) */}
         <div className="flex flex-col gap-3 flex-1">
           {player1 && (
@@ -948,6 +1160,7 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, onStateChan
           )}
         </div>
       </div>
+      )}
       
       {/* Horizontal scrolling container */}
       <div 

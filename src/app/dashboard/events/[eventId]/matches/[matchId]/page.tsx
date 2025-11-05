@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Loader2, Play } from "lucide-react";
@@ -75,6 +75,9 @@ export default function MatchPage() {
   const { isLoading, error } = useAppSelector((state) => state.match);
   const [match, setMatch] = useState<DatabaseMatch | null>(null);
   const [trackingState, setTrackingState] = useState<any>(null);
+  const [lastThrowCount, setLastThrowCount] = useState(0);
+  const [animations, setAnimations] = useState<Array<{ id: number; type: 'hit' | 'miss'; timestamp: number }>>([]);
+  const animationIdRef = useRef(0);
 
   useEffect(() => {
     if (matchId) {
@@ -96,6 +99,44 @@ export default function MatchPage() {
       setMatch(matchFromStore);
     }
   }, [matchFromStore]);
+
+  // Initialize lastThrowCount when trackingState is first loaded
+  useEffect(() => {
+    if (trackingState?.gameHistory && lastThrowCount === 0) {
+      setLastThrowCount(trackingState.gameHistory.length);
+    }
+  }, [trackingState?.gameHistory, lastThrowCount]);
+
+  // Detect new throws and show hit/miss animation
+  useEffect(() => {
+    if (!trackingState?.gameHistory) return;
+    
+    const currentThrowCount = trackingState.gameHistory.length;
+    
+    // If a new throw was added
+    if (currentThrowCount > lastThrowCount) {
+      const lastThrow = trackingState.gameHistory[trackingState.gameHistory.length - 1];
+      if (lastThrow) {
+        // Create new animation
+        const animationId = animationIdRef.current++;
+        const newAnimation = {
+          id: animationId,
+          type: lastThrow.type,
+          timestamp: Date.now()
+        };
+        
+        // Add to animations array
+        setAnimations(prev => [...prev, newAnimation]);
+        
+        // Remove after 2 seconds
+        setTimeout(() => {
+          setAnimations(prev => prev.filter(anim => anim.id !== animationId));
+        }, 2000);
+        
+        setLastThrowCount(currentThrowCount);
+      }
+    }
+  }, [trackingState?.gameHistory, lastThrowCount]);
 
   const handleStartMatch = async () => {
     if (!match || match.status !== 'not_started') {
@@ -241,9 +282,15 @@ export default function MatchPage() {
   const playerNames = getPlayerNames();
   const teamNames = getTeamNames();
   const canStartMatch = match.status === 'not_started';
+  
+  // Get current throwing team from tracking state
+  const currentThrowingTeam = trackingState?.currentTurn || null;
+  const isHomeThrowing = currentThrowingTeam === 'home';
+  const isAwayThrowing = currentThrowingTeam === 'away';
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 relative">
+
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -260,7 +307,42 @@ export default function MatchPage() {
       </motion.div>
 
       {/* Header Section - Home vs Away */}
-      <Card className="bg-[#0a0a0a] border-[#ff073a]/30 backdrop-blur-sm">
+      <Card className="bg-[#0a0a0a] border-[#ff073a]/30 backdrop-blur-sm relative overflow-hidden">
+        {/* Hit/Miss Animation inside the card */}
+        <AnimatePresence>
+          {animations.map((animation, index) => (
+            <motion.div
+              key={animation.id}
+              initial={{ opacity: 1, y: 200, scale: 1 }}
+              animate={{ 
+                opacity: 0, 
+                y: -200, 
+                scale: 0.3
+              }}
+              exit={{ opacity: 0 }}
+              transition={{
+                duration: 2,
+                ease: "easeOut"
+              }}
+              className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none"
+            >
+              <motion.div
+                className={`text-7xl md:text-8xl font-black tracking-wider ${
+                  animation.type === 'hit' 
+                    ? 'text-green-500 drop-shadow-[0_0_20px_rgba(34,197,94,0.8)]' 
+                    : 'text-red-500 drop-shadow-[0_0_20px_rgba(239,68,68,0.8)]'
+                }`}
+                style={{
+                  textShadow: animation.type === 'hit' 
+                    ? '0 0 30px rgba(34, 197, 94, 0.8), 0 0 60px rgba(34, 197, 94, 0.5)' 
+                    : '0 0 30px rgba(239, 68, 68, 0.8), 0 0 60px rgba(239, 68, 68, 0.5)'
+                }}
+              >
+                {animation.type === 'hit' ? 'HIT' : 'MISS'}
+              </motion.div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
         <CardHeader>
           <CardTitle className="text-2xl font-bold text-white text-center">
             {teamNames.home || 'Home Team'} vs {teamNames.away || 'Away Team'}
@@ -270,24 +352,66 @@ export default function MatchPage() {
           {/* Teams side by side */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
             {/* Home Team */}
-            <div className="space-y-3">
-              <h3 className="text-lg font-semibold text-white text-center">
-                {teamNames.home || 'Home Team'}
-              </h3>
+            <motion.div 
+              className={`space-y-3 p-4 rounded-lg transition-all duration-300 ${
+                isHomeThrowing 
+                  ? 'border-2 border-[#ff073a] shadow-lg shadow-[#ff073a]/50' 
+                  : 'border-2 border-transparent'
+              }`}
+              animate={isHomeThrowing ? {
+                boxShadow: [
+                  '0 0 20px rgba(255, 7, 58, 0.5)',
+                  '0 0 30px rgba(255, 7, 58, 0.7)',
+                  '0 0 20px rgba(255, 7, 58, 0.5)',
+                ],
+              } : {}}
+              transition={{
+                duration: 2,
+                repeat: isHomeThrowing ? Infinity : 0,
+                ease: "easeInOut"
+              }}
+            >
+              <div className="flex items-center justify-center gap-2">
+                <h3 className={`text-lg font-semibold text-center ${
+                  isHomeThrowing ? 'text-[#ff073a]' : 'text-white'
+                }`}>
+                  {teamNames.home || 'Home Team'}
+                </h3>
+                {isHomeThrowing && (
+                  <motion.div
+                    className="w-3 h-3 rounded-full bg-[#ff073a]"
+                    animate={{ opacity: [1, 0.3, 1] }}
+                    transition={{ duration: 1.5, repeat: Infinity }}
+                  />
+                )}
+              </div>
               <div className="space-y-2">
                 {playerNames.home.map((playerName) => {
                   const tracking = getPlayerTracking(playerName, true);
                   return (
-                    <div key={playerName} className="flex items-center justify-between p-3 bg-white/5 rounded-lg">
-                      <span className="text-white font-medium">{playerName}</span>
-                      <span className="text-white/70 text-sm">
+                    <div 
+                      key={playerName} 
+                      className={`flex items-center justify-between p-3 rounded-lg transition-all ${
+                        isHomeThrowing 
+                          ? 'bg-white/5 border border-[#ff073a]' 
+                          : 'bg-white/5'
+                      }`}
+                    >
+                      <span className={`font-medium ${
+                        isHomeThrowing ? 'text-[#ff073a]' : 'text-white'
+                      }`}>
+                        {playerName}
+                      </span>
+                      <span className={`text-sm ${
+                        isHomeThrowing ? 'text-[#ff073a]/90' : 'text-white/70'
+                      }`}>
                         {tracking.made}/{tracking.attempted} ({tracking.percentage}%)
                       </span>
                     </div>
                   );
                 })}
               </div>
-            </div>
+            </motion.div>
 
             {/* VS Divider - vertical for desktop */}
             <div className="hidden md:flex items-center justify-center">
@@ -302,24 +426,66 @@ export default function MatchPage() {
             </div>
 
             {/* Away Team */}
-            <div className="space-y-3">
-              <h3 className="text-lg font-semibold text-white text-center">
-                {teamNames.away || 'Away Team'}
-              </h3>
+            <motion.div 
+              className={`space-y-3 p-4 rounded-lg transition-all duration-300 ${
+                isAwayThrowing 
+                  ? 'border-2 border-[#ff073a] shadow-lg shadow-[#ff073a]/50' 
+                  : 'border-2 border-transparent'
+              }`}
+              animate={isAwayThrowing ? {
+                boxShadow: [
+                  '0 0 20px rgba(255, 7, 58, 0.5)',
+                  '0 0 30px rgba(255, 7, 58, 0.7)',
+                  '0 0 20px rgba(255, 7, 58, 0.5)',
+                ],
+              } : {}}
+              transition={{
+                duration: 2,
+                repeat: isAwayThrowing ? Infinity : 0,
+                ease: "easeInOut"
+              }}
+            >
+              <div className="flex items-center justify-center gap-2">
+                <h3 className={`text-lg font-semibold text-center ${
+                  isAwayThrowing ? 'text-[#ff073a]' : 'text-white'
+                }`}>
+                  {teamNames.away || 'Away Team'}
+                </h3>
+                {isAwayThrowing && (
+                  <motion.div
+                    className="w-3 h-3 rounded-full bg-[#ff073a]"
+                    animate={{ opacity: [1, 0.3, 1] }}
+                    transition={{ duration: 1.5, repeat: Infinity }}
+                  />
+                )}
+              </div>
               <div className="space-y-2">
                 {playerNames.away.map((playerName) => {
                   const tracking = getPlayerTracking(playerName, false);
                   return (
-                    <div key={playerName} className="flex items-center justify-between p-3 bg-white/5 rounded-lg">
-                      <span className="text-white font-medium">{playerName}</span>
-                      <span className="text-white/70 text-sm">
+                    <div 
+                      key={playerName} 
+                      className={`flex items-center justify-between p-3 rounded-lg transition-all ${
+                        isAwayThrowing 
+                          ? 'bg-white/5 border border-[#ff073a]' 
+                          : 'bg-white/5'
+                      }`}
+                    >
+                      <span className={`font-medium ${
+                        isAwayThrowing ? 'text-[#ff073a]' : 'text-white'
+                      }`}>
+                        {playerName}
+                      </span>
+                      <span className={`text-sm ${
+                        isAwayThrowing ? 'text-[#ff073a]/90' : 'text-white/70'
+                      }`}>
                         {tracking.made}/{tracking.attempted} ({tracking.percentage}%)
                       </span>
                     </div>
                   );
                 })}
               </div>
-            </div>
+            </motion.div>
           </div>
 
           {/* Start Match Button - only show if not_started */}
@@ -349,6 +515,7 @@ export default function MatchPage() {
           awayPlayers={playerNames.away}
           matchType={match.type}
           matchId={match.id}
+          bestOf={match.bestOf || 1}
           onStateChange={(state) => {
             setTrackingState(state);
           }}
