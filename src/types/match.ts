@@ -41,6 +41,7 @@ export interface DatabaseMatch {
   awayPlayer2Name?: string | null;
   homeScore?: number | null;
   awayScore?: number | null;
+  bestOf?: number | null; // Best Of number (e.g., 7 for BO7 = 4 wins needed)
   trackingData?: TrackingData | null;
   createdAt: string;
   updatedAt: string;

@@ -1,0 +1,1 @@
+ALTER TABLE "match" ADD COLUMN "best_of" integer DEFAULT 1;

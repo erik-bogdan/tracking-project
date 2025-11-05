@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
@@ -20,6 +21,7 @@ import { toast } from "sonner";
 // Unified schema with all optional fields - validation happens in onSubmit based on event type
 const matchSchema = z.object({
   dateTime: z.string().min(1, "Date and time is required"),
+  bestOf: z.number().min(1).max(21).default(1), // Best Of 1-21 (e.g., BO7 = 7)
   // All fields optional - we'll validate manually based on event type
   homePlayerName: z.string().optional(),
   awayPlayerName: z.string().optional(),
@@ -61,6 +63,7 @@ export default function NewMatchPage() {
     resolver: zodResolver(matchSchema),
     defaultValues: {
       dateTime: "",
+      bestOf: 1,
     },
     mode: 'onChange',
   });
@@ -133,6 +136,7 @@ export default function NewMatchPage() {
       eventId,
       type: event?.type || "1on1",
       dateTime: dateTimeISO,
+      bestOf: data.bestOf || 1,
       // Only include fields that are relevant
       homePlayerName: data.homePlayerName,
       awayPlayerName: data.awayPlayerName,
@@ -235,6 +239,47 @@ export default function NewMatchPage() {
               {errors.dateTime && (
                 <p className="text-sm text-[#ff4569]">{errors.dateTime.message}</p>
               )}
+            </div>
+
+            {/* Best Of */}
+            <div className="space-y-2">
+              <Label htmlFor="bestOf" className="text-white/90">
+                Best Of (BO)
+              </Label>
+              <Controller
+                name="bestOf"
+                control={control}
+                render={({ field }) => (
+                  <Select
+                    value={field.value?.toString() || "1"}
+                    onValueChange={(value) => field.onChange(parseInt(value, 10))}
+                  >
+                    <SelectTrigger className="bg-white/5 border-[#ff073a]/30 text-white focus:border-[#ff073a]/40 focus:ring-[#ff073a]/20">
+                      <SelectValue placeholder="Select Best Of" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#0a0a0a] border-[#ff073a]/30">
+                      {[1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21].map((bo) => {
+                        const winsNeeded = Math.ceil(bo / 2);
+                        return (
+                          <SelectItem
+                            key={bo}
+                            value={bo.toString()}
+                            className="text-white hover:bg-[#ff073a]/20 focus:bg-[#ff073a]/20"
+                          >
+                            BO{bo} ({winsNeeded} {winsNeeded === 1 ? 'win' : 'wins'} needed)
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {errors.bestOf && (
+                <p className="text-sm text-[#ff4569]">{errors.bestOf.message}</p>
+              )}
+              <p className="text-xs text-white/60">
+                Select the number of games in the match. BO7 means first to 4 wins.
+              </p>
             </div>
 
             {is1v1 ? (

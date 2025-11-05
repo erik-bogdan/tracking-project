@@ -6,6 +6,7 @@ interface CreateMatchPayload {
   eventId: string;
   type: '1on1' | '2on2';
   dateTime: string;
+  bestOf?: number; // Best Of number (defaults to 1)
   // 1v1 fields
   homePlayerName?: string;
   awayPlayerName?: string;

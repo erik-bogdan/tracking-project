@@ -58,6 +58,7 @@ export const matchController = new Elysia({ prefix: '/match' })
                 type: body.type,
                 status: 'not_started',
                 date: new Date(body.dateTime),
+                bestOf: body.bestOf || 1,
                 // 1v1 fields
                 homePlayerName: body.homePlayerName || null,
                 awayPlayerName: body.awayPlayerName || null,
@@ -86,6 +87,7 @@ export const matchController = new Elysia({ prefix: '/match' })
             eventId: t.String(),
             type: t.Union([t.Literal('1on1'), t.Literal('2on2')]),
             dateTime: t.String(), // ISO string
+            bestOf: t.Optional(t.Number()), // Best Of number (defaults to 1)
             // 1v1 fields (optional in schema, required in validation)
             homePlayerName: t.Optional(t.String()),
             awayPlayerName: t.Optional(t.String()),

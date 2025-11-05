@@ -74,6 +74,7 @@ export default function MatchPage() {
   const dispatch = useAppDispatch();
   const { isLoading, error } = useAppSelector((state) => state.match);
   const [match, setMatch] = useState<DatabaseMatch | null>(null);
+  const [trackingState, setTrackingState] = useState<any>(null);
 
   useEffect(() => {
     if (matchId) {
@@ -160,41 +161,65 @@ export default function MatchPage() {
 
   // Get tracking data for a player
   const getPlayerTracking = (playerName: string, isHome: boolean): PlayerTrackingData => {
-    if (!match?.trackingData) {
-      return {
-        playerName,
-        made: 0,
-        attempted: 0,
-        percentage: 0,
-      };
+    // If we have live tracking state, use that (most up-to-date)
+    if (trackingState?.gameHistory) {
+      // Find the player index in the names array (0 or 1)
+      const playerIndex = isHome 
+        ? playerNames.home.findIndex(p => p === playerName)
+        : playerNames.away.findIndex(p => p === playerName);
+      
+      // Player IDs are in format "player-0", "player-1" based on index
+      // Or we can use the trackingState's player IDs directly
+      let playerId: string | null = null;
+      if (playerIndex === 0) {
+        playerId = isHome ? trackingState.homeFirstPlayer : trackingState.awayFirstPlayer;
+      } else if (playerIndex === 1) {
+        playerId = isHome ? trackingState.homeSecondPlayer : trackingState.awaySecondPlayer;
+      }
+      
+      // Fallback: if player IDs not found, use index-based format
+      if (!playerId && playerIndex >= 0) {
+        playerId = `player-${playerIndex}`;
+      }
+      
+      if (playerId) {
+        const playerThrows = trackingState.gameHistory.filter((action: any) => {
+          return action.playerId === playerId && action.team === (isHome ? 'home' : 'away');
+        });
+        
+        const hits = playerThrows.filter((action: any) => action.type === 'hit').length;
+        const total = playerThrows.length;
+        const percentage = total > 0 ? Math.round((hits / total) * 100) : 0;
+        
+        return {
+          playerName,
+          made: hits,
+          attempted: total,
+          percentage,
+        };
+      }
     }
 
-    // Handle both object and array formats
-    const trackingData = match.trackingData as any;
-    const teamData = isHome ? trackingData.home : trackingData.away;
-    
-    if (!teamData || !Array.isArray(teamData)) {
-      return {
-        playerName,
-        made: 0,
-        attempted: 0,
-        percentage: 0,
-      };
-    }
+    // Fallback to match.trackingData if available
+    if (match?.trackingData) {
+      const trackingData = match.trackingData as any;
+      const teamData = isHome ? trackingData.home : trackingData.away;
+      
+      if (teamData && Array.isArray(teamData)) {
+        const playerData = teamData.find((p: any) => p.playerName === playerName);
 
-    const playerData = teamData.find((p: any) => p.playerName === playerName);
-
-    if (playerData) {
-      // Calculate percentage if not provided
-      const percentage = playerData.attempted > 0 
-        ? Math.round((playerData.made / playerData.attempted) * 100)
-        : 0;
-      return {
-        playerName: playerData.playerName || playerName,
-        made: playerData.made || 0,
-        attempted: playerData.attempted || 0,
-        percentage,
-      };
+        if (playerData) {
+          const percentage = playerData.attempted > 0 
+            ? Math.round((playerData.made / playerData.attempted) * 100)
+            : 0;
+          return {
+            playerName: playerData.playerName || playerName,
+            made: playerData.made || 0,
+            attempted: playerData.attempted || 0,
+            percentage,
+          };
+        }
+      }
     }
 
     return {
@@ -322,6 +347,11 @@ export default function MatchPage() {
           }
           homePlayers={playerNames.home}
           awayPlayers={playerNames.away}
+          matchType={match.type}
+          matchId={match.id}
+          onStateChange={(state) => {
+            setTrackingState(state);
+          }}
         />
       )}
 

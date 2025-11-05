@@ -100,6 +100,8 @@ export const match = pgTable("match", {
 	// Score (optional)
 	homeScore: integer('home_score'),
 	awayScore: integer('away_score'),
+	// Best Of (BO) - number of games needed to win (e.g., BO7 = 4 wins needed)
+	bestOf: integer('best_of').default(1),
 	// Tracking data (JSONB) - stores player throw statistics
 	trackingData: jsonb('tracking_data'),
 	createdAt: timestamp('created_at').notNull().defaultNow(),

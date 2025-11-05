@@ -124,3 +124,23 @@
     background-color: #000000;
   }
 }
+
+/* Custom scrollbar for throw tracker */
+.custom-scrollbar::-webkit-scrollbar {
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #0a0a0a;
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #ff073a;
+  border-radius: 4px;
+  border: 1px solid #0a0a0a;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #ff1744;
+}
