@@ -11,6 +11,8 @@ interface ThrowTrackerProps {
   matchType: MatchType;
   matchId?: string;
   bestOf?: number; // Best Of number (e.g., 7 for BO7)
+  matchStatus?: 'not_started' | 'live' | 'finished';
+  initialGameState?: any; // Initial game state from DB (for finished matches)
   onStateChange?: (state: any) => void;
   className?: string;
 }
@@ -35,6 +37,8 @@ export function ThrowTracker({
   matchType, 
   matchId, 
   bestOf,
+  matchStatus,
+  initialGameState,
   onStateChange, 
   className 
 }: ThrowTrackerProps) {
@@ -49,6 +53,9 @@ export function ThrowTracker({
         homePlayer={homePlayersObj[0] || { id: 'home', label: 'Home Player' }}
         awayPlayer={awayPlayersObj[0] || { id: 'away', label: 'Away Player' }}
         matchId={matchId}
+        bestOf={bestOf}
+        matchStatus={matchStatus}
+        initialGameState={initialGameState}
         onStateChange={onStateChange}
         className={className}
       />
@@ -61,6 +68,8 @@ export function ThrowTracker({
         awayPlayers={awayPlayersObj}
         matchId={matchId}
         bestOf={bestOf}
+        matchStatus={matchStatus}
+        initialGameState={initialGameState}
         onStateChange={onStateChange}
         className={className}
       />

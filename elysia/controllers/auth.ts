@@ -17,3 +17,9 @@ export const authController = new Elysia({ prefix: '/auth' })
     .all("/*", betterAuthView);
 
 
+
+
+
+
+
+

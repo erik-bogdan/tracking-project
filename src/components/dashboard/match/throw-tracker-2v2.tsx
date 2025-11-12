@@ -16,6 +16,8 @@ interface ThrowTracker2v2Props {
   awayPlayers: Player[];
   matchId?: string;
   bestOf?: number; // Best Of number (e.g., 7 for BO7)
+  matchStatus?: 'not_started' | 'live' | 'finished';
+  initialGameState?: any; // Initial game state from DB (for finished matches)
   onStateChange?: (state: any) => void;
   className?: string;
 }
@@ -51,9 +53,11 @@ interface GameState {
   // Match state (multiple games)
   currentGame: number; // Current game number (1, 2, 3, ...)
   matchWins: { home: number; away: number }; // Wins per team
-  matchHistory: Array<{ gameNumber: number; winner: 'home' | 'away' | null; startingTeam: 'home' | 'away' }>; // History of completed games
+  matchHistory: Array<{ gameNumber: number; winner: 'home' | 'away' | null; startingTeam: 'home' | 'away'; gameHistory: GameAction[] }>; // History of completed games with their throws
   waitingForStartingTeam?: boolean; // If true, show starting team selection
   matchEnded?: boolean; // True when match is complete (someone reached required wins)
+  // Store all game histories separately for undo across games
+  allGameHistories: Array<{ gameNumber: number; history: GameAction[] }>; // Full history for each game
 }
 
 interface GameAction {
@@ -126,7 +130,7 @@ function calculateScoreUpTo(throws: ThrowRecord[], upToIndex: number): { home: n
   return { home: homeScore, away: awayScore };
 }
 
-export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1, onStateChange, className }: ThrowTracker2v2Props) {
+export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1, matchStatus, initialGameState, onStateChange, className }: ThrowTracker2v2Props) {
   const [isInitialized, setIsInitialized] = useState(false);
   const [gameState, setGameState] = useState<GameState>({
     homeScore: 0,
@@ -152,7 +156,8 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
     matchWins: { home: 0, away: 0 },
     matchHistory: [],
     waitingForStartingTeam: true,
-    matchEnded: false
+    matchEnded: false,
+    allGameHistories: []
   });
 
   // Calculate wins needed
@@ -162,6 +167,10 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
 
   // Load from localStorage
   const loadFromLocalStorage = useCallback(() => {
+    // Don't load from localStorage if match is finished - should load from DB instead
+    if (matchStatus === 'finished') {
+      return false;
+    }
     if (!localStorageKey) return false;
     try {
       const savedData = localStorage.getItem(localStorageKey);
@@ -169,7 +178,17 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
         const parsedData = JSON.parse(savedData);
         const isDataValid = Date.now() - parsedData.timestamp < 24 * 60 * 60 * 1000;
         if (isDataValid) {
-          setGameState(parsedData.gameState);
+          // Ensure all required fields are present
+          const loadedState = parsedData.gameState;
+          setGameState({
+            ...loadedState,
+            matchWins: loadedState.matchWins || { home: 0, away: 0 },
+            matchHistory: loadedState.matchHistory || [],
+            currentGame: loadedState.currentGame || 1,
+            waitingForStartingTeam: loadedState.waitingForStartingTeam ?? (loadedState.gameHistory?.length === 0),
+            matchEnded: loadedState.matchEnded || false,
+            allGameHistories: loadedState.allGameHistories || [],
+          });
           return true;
         } else {
           localStorage.removeItem(localStorageKey);
@@ -180,10 +199,14 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
       if (localStorageKey) localStorage.removeItem(localStorageKey);
     }
     return false;
-  }, [localStorageKey]);
+  }, [localStorageKey, matchStatus]);
 
   // Save to localStorage
   const saveToLocalStorage = useCallback(() => {
+    // Don't save to localStorage if match is finished
+    if (matchStatus === 'finished') {
+      return;
+    }
     if (!localStorageKey) return;
     const dataToSave = {
       gameState,
@@ -194,11 +217,30 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
     } catch (error) {
       console.error('Error saving to localStorage:', error);
     }
-  }, [gameState, localStorageKey]);
+  }, [gameState, localStorageKey, matchStatus]);
 
   // Load on mount - only once
   useEffect(() => {
     if (isInitialized) return;
+    
+    // If match is finished and we have initial game state from DB, use that
+    if (matchStatus === 'finished' && initialGameState) {
+      setGameState({
+        ...initialGameState,
+        matchWins: initialGameState.matchWins || { home: 0, away: 0 },
+        matchHistory: initialGameState.matchHistory || [],
+        currentGame: initialGameState.currentGame || 1,
+        waitingForStartingTeam: false, // Finished matches don't need starting team selection
+        matchEnded: initialGameState.matchEnded || false,
+        allGameHistories: initialGameState.allGameHistories || [],
+        homeFirstPlayer: initialGameState.homeFirstPlayer || homePlayers[0]?.id || '',
+        homeSecondPlayer: initialGameState.homeSecondPlayer || homePlayers[1]?.id || '',
+        awayFirstPlayer: initialGameState.awayFirstPlayer || awayPlayers[0]?.id || '',
+        awaySecondPlayer: initialGameState.awaySecondPlayer || awayPlayers[1]?.id || '',
+      });
+      setIsInitialized(true);
+      return;
+    }
     
     const wasLoaded = loadFromLocalStorage();
     if (!wasLoaded) {
@@ -264,6 +306,33 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
       const lastGame = prev.matchHistory[prev.matchHistory.length - 1];
       const nextStartingTeam = lastGame?.startingTeam === 'home' ? 'away' : 'home';
       
+      // Ensure current game history is saved to allGameHistories before moving to next
+      // Check if already saved in allGameHistories first
+      const existingHistory = prev.allGameHistories?.find(g => g.gameNumber === prev.currentGame);
+      
+      let currentGameHistory: GameAction[] = [];
+      if (existingHistory && existingHistory.history.length > 0) {
+        // Already saved, use it
+        currentGameHistory = existingHistory.history;
+      } else if (prev.gameHistory.length > 0) {
+        // Use current gameHistory
+        currentGameHistory = prev.gameHistory;
+      } else if (prev.gameEnded) {
+        // Try to get from matchHistory if game ended
+        const currentGameEntry = prev.matchHistory.find(g => g.gameNumber === prev.currentGame);
+        if (currentGameEntry && currentGameEntry.gameHistory) {
+          currentGameHistory = currentGameEntry.gameHistory;
+        }
+      }
+      
+      const updatedAllGameHistories = [
+        ...(prev.allGameHistories || []).filter(g => g.gameNumber !== prev.currentGame),
+        ...(currentGameHistory.length > 0 ? [{
+          gameNumber: prev.currentGame,
+          history: [...currentGameHistory]
+        }] : [])
+      ];
+      
       return {
         ...prev,
         currentGame: nextGame,
@@ -290,7 +359,8 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
         otHome: 0,
         otAway: 0,
         overtimePeriod: 0,
-        lastOvertimeThrower: null
+        lastOvertimeThrower: null,
+        allGameHistories: updatedAllGameHistories
       };
     });
   };
@@ -626,7 +696,8 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
             {
               gameNumber: prev.currentGame,
               winner,
-              startingTeam: lastGame?.startingTeam || prev.currentTurn
+              startingTeam: lastGame?.startingTeam || prev.currentTurn,
+              gameHistory: [...newHistory] // Save the full game history
             }
           ];
           
@@ -635,6 +706,19 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
             updatedMatchEnded = true;
           }
         }
+      }
+
+      // Save current game history to allGameHistories when game ends
+      let updatedAllGameHistories = prev.allGameHistories || [];
+      if (newGameEnded && !prev.gameEnded) {
+        // Save this game's history before moving to next game
+        updatedAllGameHistories = [
+          ...updatedAllGameHistories.filter(g => g.gameNumber !== prev.currentGame),
+          {
+            gameNumber: prev.currentGame,
+            history: [...newHistory]
+          }
+        ];
       }
 
       return {
@@ -661,22 +745,21 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
         lastOvertimeThrower: newLastOvertimeThrower,
         matchWins: updatedMatchWins,
         matchHistory: updatedMatchHistory,
-        matchEnded: updatedMatchEnded
+        matchEnded: updatedMatchEnded,
+        allGameHistories: updatedAllGameHistories
       };
     });
   };
 
   // Recompute from history for undo
   const recomputeFromHistory = (actions: GameAction[]): GameState => {
+    // Start with current state to preserve match-level data
     let state: GameState = {
+      ...gameState,
       homeScore: 0,
       awayScore: 0,
       currentTurn: 'home',
       phase: 'regular',
-      homeFirstPlayer: gameState.homeFirstPlayer,
-      homeSecondPlayer: gameState.homeSecondPlayer,
-      awayFirstPlayer: gameState.awayFirstPlayer,
-      awaySecondPlayer: gameState.awaySecondPlayer,
       lastThrower: null,
       consecutiveThrows: 0,
       returnServeCount: 0,
@@ -695,6 +778,13 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
       otAway: 0,
       overtimePeriod: 0,
       lastOvertimeThrower: null,
+      // Ensure match-level fields are initialized
+      currentGame: gameState.currentGame || 1,
+      matchWins: gameState.matchWins || { home: 0, away: 0 },
+      matchHistory: gameState.matchHistory || [],
+      waitingForStartingTeam: gameState.waitingForStartingTeam ?? true,
+      matchEnded: false,
+      allGameHistories: gameState.allGameHistories || [],
     };
 
     const apply = (prev: GameState, action: GameAction): GameState => {
@@ -878,10 +968,131 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
 
   const undoLastAction = () => {
     setGameState(prev => {
+      // If current game has no history, go back to previous game
+      if (prev.gameHistory.length === 0 && prev.currentGame > 1) {
+        const previousGameNumber = prev.currentGame - 1;
+        
+        // Try to find previous game history from allGameHistories first
+        let previousGameHistory: GameAction[] | null = null;
+        const previousGameFromAll = prev.allGameHistories?.find(g => g.gameNumber === previousGameNumber);
+        if (previousGameFromAll && previousGameFromAll.history.length > 0) {
+          previousGameHistory = previousGameFromAll.history;
+        } else {
+          // If not found in allGameHistories, try matchHistory
+          const previousGameFromMatch = prev.matchHistory?.find(g => g.gameNumber === previousGameNumber);
+          if (previousGameFromMatch && previousGameFromMatch.gameHistory && previousGameFromMatch.gameHistory.length > 0) {
+            previousGameHistory = previousGameFromMatch.gameHistory;
+          }
+        }
+        
+        if (previousGameHistory && previousGameHistory.length > 0) {
+          // Restore previous game with its history minus last throw
+          const previousHistory = previousGameHistory.slice(0, -1);
+          const recomputed = recomputeFromHistory(previousHistory);
+          
+          // Recalculate match wins - remove the win from previous game
+          let updatedMatchWins = prev.matchWins || { home: 0, away: 0 };
+          let updatedMatchHistory = prev.matchHistory || [];
+          const previousGameEntry = updatedMatchHistory.find(g => g.gameNumber === previousGameNumber);
+          
+          if (previousGameEntry && previousGameEntry.winner) {
+            // Remove the win
+            updatedMatchWins = {
+              home: previousGameEntry.winner === 'home' ? Math.max(0, updatedMatchWins.home - 1) : updatedMatchWins.home,
+              away: previousGameEntry.winner === 'away' ? Math.max(0, updatedMatchWins.away - 1) : updatedMatchWins.away,
+            };
+            // Update match history - mark as not won
+            updatedMatchHistory = updatedMatchHistory.map(g => 
+              g.gameNumber === previousGameNumber 
+                ? { ...g, winner: null, gameHistory: previousHistory }
+                : g
+            );
+          }
+          
+          // Update allGameHistories
+          const updatedAllGameHistories = [
+            ...(prev.allGameHistories || []).filter(g => g.gameNumber !== previousGameNumber),
+            {
+              gameNumber: previousGameNumber,
+              history: previousHistory
+            }
+          ];
+          
+          const winsNeeded = Math.ceil(bestOf / 2);
+          const updatedMatchEnded = updatedMatchWins.home >= winsNeeded || updatedMatchWins.away >= winsNeeded;
+          
+          return {
+            ...recomputed,
+            gameHistory: previousHistory,
+            currentGame: previousGameNumber,
+            matchWins: updatedMatchWins,
+            matchHistory: updatedMatchHistory,
+            matchEnded: updatedMatchEnded,
+            allGameHistories: updatedAllGameHistories,
+            gameEnded: false, // Game is not ended anymore
+            waitingForStartingTeam: false, // We're continuing the game
+          };
+        }
+        return prev;
+      }
+      
+      // Normal undo within current game
       if (prev.gameHistory.length === 0) return prev;
+      
       const newHistory = prev.gameHistory.slice(0, -1);
       const recomputed = recomputeFromHistory(newHistory);
-      return { ...recomputed, gameHistory: newHistory };
+      
+      // If game was ended and we're undoing, we need to recalculate match wins
+      let updatedMatchWins = prev.matchWins || { home: 0, away: 0 };
+      let updatedMatchHistory = prev.matchHistory || [];
+      let updatedMatchEnded = false;
+      let updatedAllGameHistories = prev.allGameHistories || [];
+      
+      // If game was ended before undo, check if we need to remove a win
+      if (prev.gameEnded && !recomputed.gameEnded) {
+        // Game was ended, now it's not - we need to remove the last win from match history
+        const lastGameEntry = updatedMatchHistory.find(g => g.gameNumber === prev.currentGame);
+        if (lastGameEntry && lastGameEntry.winner) {
+          // Remove this win
+          updatedMatchWins = {
+            home: lastGameEntry.winner === 'home' ? Math.max(0, updatedMatchWins.home - 1) : updatedMatchWins.home,
+            away: lastGameEntry.winner === 'away' ? Math.max(0, updatedMatchWins.away - 1) : updatedMatchWins.away,
+          };
+          // Remove from match history
+          updatedMatchHistory = updatedMatchHistory.map(g => 
+            g.gameNumber === prev.currentGame && g.winner
+              ? { ...g, winner: null }
+              : g
+          );
+          
+          // Update allGameHistories
+          updatedAllGameHistories = updatedAllGameHistories.map(g =>
+            g.gameNumber === prev.currentGame
+              ? { ...g, history: newHistory }
+              : g
+          );
+        }
+      } else {
+        // Update current game history in allGameHistories
+        updatedAllGameHistories = prev.allGameHistories.map(g =>
+          g.gameNumber === prev.currentGame
+            ? { ...g, history: newHistory }
+            : g
+        );
+      }
+      
+      // Recalculate matchEnded based on wins
+      const winsNeeded = Math.ceil(bestOf / 2);
+      updatedMatchEnded = updatedMatchWins.home >= winsNeeded || updatedMatchWins.away >= winsNeeded;
+      
+      return { 
+        ...recomputed, 
+        gameHistory: newHistory,
+        matchWins: updatedMatchWins,
+        matchHistory: updatedMatchHistory,
+        matchEnded: updatedMatchEnded,
+        allGameHistories: updatedAllGameHistories,
+      };
     });
   };
 
@@ -1017,7 +1228,7 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
       
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-white text-center flex-1">Throw Tracker (2v2)</h3>
-        {gameState.gameHistory.length > 0 && !gameState.waitingForStartingTeam && !gameState.gameEnded && !gameState.matchEnded && (
+        {(gameState.gameHistory.length > 0 || (gameState.currentGame > 1 && (gameState.allGameHistories?.some(g => g.gameNumber === gameState.currentGame - 1 && g.history.length > 0) || gameState.matchHistory?.some(g => g.gameNumber === gameState.currentGame - 1)))) && (
           <Button
             onClick={undoLastAction}
             variant="ghost"
@@ -1034,10 +1245,10 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
       {bestOf > 1 && (
         <div className="mb-4 text-center">
           <div className="text-white/90 text-lg font-semibold mb-1">
-            Match: {gameState.matchWins.home} - {gameState.matchWins.away} (Best of {bestOf})
+            Match: {(gameState.matchWins?.home ?? 0)} - {(gameState.matchWins?.away ?? 0)} (Best of {bestOf})
           </div>
           <div className="text-white/60 text-xs">
-            Game {gameState.currentGame} - {winsNeeded} {winsNeeded === 1 ? 'win' : 'wins'} needed
+            Game {gameState.currentGame || 1} - {winsNeeded} {winsNeeded === 1 ? 'win' : 'wins'} needed
           </div>
         </div>
       )}
@@ -1049,7 +1260,7 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
             Match Complete!
           </div>
           <div className="text-white/90 text-lg">
-            {gameState.matchWins.home > gameState.matchWins.away ? 'Home Team' : 'Away Team'} wins the match!
+            {(gameState.matchWins?.home ?? 0) > (gameState.matchWins?.away ?? 0) ? 'Home Team' : 'Away Team'} wins the match!
           </div>
         </div>
       )}

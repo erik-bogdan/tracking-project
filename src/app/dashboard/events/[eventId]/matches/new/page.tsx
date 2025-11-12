@@ -16,6 +16,7 @@ import Link from "next/link";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
 import { createMatch, clearError, fetchMatches } from "@/lib/slices/matchSlice";
 import { fetchEvents } from "@/lib/slices/eventSlice";
+import { DateTimePicker } from "@/components/dashboard/date-time-picker";
 import { toast } from "sonner";
 
 // Unified schema with all optional fields - validation happens in onSubmit based on event type
@@ -71,7 +72,7 @@ export default function NewMatchPage() {
   // Set default date when event loads
   useEffect(() => {
     if (event?.date) {
-      const dateValue = new Date(event.date).toISOString().slice(0, 16);
+      const dateValue = new Date(event.date).toISOString();
       setValue("dateTime", dateValue);
     }
   }, [event, setValue]);
@@ -219,22 +220,27 @@ export default function NewMatchPage() {
           <CardContent className="space-y-6">
             {/* Date and Time */}
             <div className="space-y-2">
-              <Label htmlFor="dateTime" className="text-white/90">
+              <Label className="text-white/90">
                 Date and Time *
               </Label>
-              <Input
-                id="dateTime"
-                type="datetime-local"
-                {...register("dateTime", {
-                  setValueAs: (value: string) => {
-                    // Convert datetime-local format (YYYY-MM-DDTHH:mm) to ISO string
-                    if (!value) return "";
-                    const date = new Date(value);
-                    if (isNaN(date.getTime())) return "";
-                    return date.toISOString();
-                  },
-                })}
-                className="bg-white/5 border-[#ff073a]/30 text-white placeholder:text-white/40 focus:border-[#ff073a]/40 focus:ring-[#ff073a]/20"
+              <Controller
+                name="dateTime"
+                control={control}
+                render={({ field }) => {
+                  const dateValue = field.value ? new Date(field.value) : undefined;
+                  return (
+                    <DateTimePicker
+                      value={dateValue}
+                      onChange={(date) => {
+                        if (date) {
+                          field.onChange(date.toISOString());
+                        } else {
+                          field.onChange("");
+                        }
+                      }}
+                    />
+                  );
+                }}
               />
               {errors.dateTime && (
                 <p className="text-sm text-[#ff4569]">{errors.dateTime.message}</p>

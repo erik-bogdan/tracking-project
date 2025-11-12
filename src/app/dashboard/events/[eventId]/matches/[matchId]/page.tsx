@@ -9,6 +9,7 @@ import { ArrowLeft, Loader2, Play } from "lucide-react";
 import Link from "next/link";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
 import { fetchMatch, startMatch } from "@/lib/slices/matchSlice";
+import { syncTracking, finishTracking } from "@/lib/slices/matchSlice";
 import { DatabaseMatch, PlayerTrackingData, TrackingData, ThrowRecord } from "@/types/match";
 import { toast } from "sonner";
 import { ThrowTracker } from "@/components/dashboard/match/throw-tracker";
@@ -44,6 +45,24 @@ function generateMockThrows(match: DatabaseMatch): ThrowRecord[] {
   return throws;
 }
 
+// Calculate score up to a specific throw index
+function calculateScoreUpTo(throws: Array<{ team: 'home' | 'away'; made: boolean }>, upToIndex: number): { home: number; away: number } {
+  let homeScore = 0;
+  let awayScore = 0;
+  
+  for (let i = 0; i <= upToIndex && i < throws.length; i++) {
+    if (throws[i].made) {
+      if (throws[i].team === 'home') {
+        homeScore++;
+      } else {
+        awayScore++;
+      }
+    }
+  }
+  
+  return { home: homeScore, away: awayScore };
+}
+
 function getPlayerNamesFromMatch(match: DatabaseMatch) {
   if (match.type === '1on1') {
     return {
@@ -73,11 +92,13 @@ export default function MatchPage() {
   const matchId = params.matchId as string;
   const dispatch = useAppDispatch();
   const { isLoading, error } = useAppSelector((state) => state.match);
+  const { isLoading: isFinishing } = useAppSelector((state) => state.match);
   const [match, setMatch] = useState<DatabaseMatch | null>(null);
   const [trackingState, setTrackingState] = useState<any>(null);
   const [lastThrowCount, setLastThrowCount] = useState(0);
   const [animations, setAnimations] = useState<Array<{ id: number; type: 'hit' | 'miss'; timestamp: number }>>([]);
   const animationIdRef = useRef(0);
+  const syncTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (matchId) {
@@ -100,12 +121,52 @@ export default function MatchPage() {
     }
   }, [matchFromStore]);
 
+  // Load tracking state from DB if match is finished
+  useEffect(() => {
+    if (match && match.status === 'finished' && match.trackingData && !trackingState) {
+      // Load from DB trackingData instead of localStorage
+      const dbTrackingData = match.trackingData as any;
+      if (dbTrackingData.gameState) {
+        setTrackingState(dbTrackingData.gameState);
+      }
+    }
+  }, [match, trackingState]);
+
   // Initialize lastThrowCount when trackingState is first loaded
   useEffect(() => {
     if (trackingState?.gameHistory && lastThrowCount === 0) {
       setLastThrowCount(trackingState.gameHistory.length);
     }
   }, [trackingState?.gameHistory, lastThrowCount]);
+
+  // Sync tracking data to backend (debounced)
+  useEffect(() => {
+    if (!trackingState || !matchId || match?.status !== 'live') return;
+    
+    // Clear existing timer
+    if (syncTimerRef.current) {
+      clearTimeout(syncTimerRef.current);
+    }
+    
+    // Debounce sync to avoid too many requests (500ms delay)
+    syncTimerRef.current = setTimeout(() => {
+      const trackingPayload = {
+        gameState: trackingState,
+        gameHistory: trackingState.gameHistory || [],
+        timestamp: Date.now()
+      };
+      
+      dispatch(syncTracking({ matchId, trackingData: trackingPayload })).catch(err => {
+        console.error('Failed to sync tracking data:', err);
+      });
+    }, 500);
+    
+    return () => {
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+      }
+    };
+  }, [trackingState, matchId, match?.status, dispatch]);
 
   // Detect new throws and show hit/miss animation
   useEffect(() => {
@@ -164,6 +225,41 @@ export default function MatchPage() {
     } catch (error) {
       console.error('Error in handleStartMatch:', error);
       toast.error("Failed to start match", {
+        description: error instanceof Error ? error.message : "An unexpected error occurred.",
+      });
+    }
+  };
+
+  const handleFinishMatch = async () => {
+    if (!match || !matchId) return;
+
+    try {
+      const trackingPayload = trackingState ? {
+        gameState: trackingState,
+        gameHistory: trackingState.gameHistory || [],
+        timestamp: Date.now()
+      } : undefined;
+
+      const result = await dispatch(finishTracking({ matchId, trackingData: trackingPayload }));
+      
+      if (finishTracking.fulfilled.match(result)) {
+        const updatedMatch = result.payload;
+        if (updatedMatch) {
+          setMatch(updatedMatch);
+          toast.success("Match finished!", {
+            description: "The match status has been updated to finished.",
+          });
+          // Refresh match from store
+          dispatch(fetchMatch(matchId));
+        }
+      } else {
+        toast.error("Failed to finish match", {
+          description: result.payload as string || "An error occurred while finishing the match.",
+        });
+      }
+    } catch (error) {
+      console.error('Error finishing match:', error);
+      toast.error("Failed to finish match", {
         description: error instanceof Error ? error.message : "An unexpected error occurred.",
       });
     }
@@ -500,6 +596,29 @@ export default function MatchPage() {
               </Button>
             </div>
           )}
+
+          {/* Finish Match Button - show if match is live and tracking shows match ended */}
+          {match?.status === 'live' && trackingState?.matchEnded && match?.status !== 'finished' && (
+            <div className="pt-4 border-t border-white/20">
+              <Button
+                onClick={handleFinishMatch}
+                disabled={isFinishing}
+                className="w-full bg-gradient-to-r from-green-600 to-green-700 text-white hover:from-green-700 hover:to-green-800 disabled:opacity-50"
+              >
+                {isFinishing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Finishing...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4 mr-2" />
+                    Finish Match
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -516,11 +635,349 @@ export default function MatchPage() {
           matchType={match.type}
           matchId={match.id}
           bestOf={match.bestOf || 1}
+          matchStatus={match.status}
+          initialGameState={
+            match.status === 'finished' && match.trackingData && (match.trackingData as any).gameState
+              ? (match.trackingData as any).gameState
+              : undefined
+          }
           onStateChange={(state) => {
-            setTrackingState(state);
+            // Only update tracking state if match is not finished (to avoid overwriting DB data)
+            if (match.status !== 'finished') {
+              setTrackingState(state);
+            }
           }}
         />
       )}
+
+      {/* Match History - show all completed games with statistics */}
+      {match.status !== 'not_started' && (() => {
+        // Get matchHistory from trackingState or from match.trackingData
+        const matchHistory = trackingState?.matchHistory || 
+          (match.trackingData && (match.trackingData as any).gameState?.matchHistory) || 
+          [];
+        
+        return matchHistory.length > 0;
+      })() && (() => {
+        const matchHistory = trackingState?.matchHistory || 
+          (match.trackingData && (match.trackingData as any).gameState?.matchHistory) || 
+          [];
+        
+        return (
+        <Card className="bg-[#0a0a0a] border-[#ff073a]/30 backdrop-blur-sm">
+          <CardHeader>
+            <CardTitle className="text-2xl font-bold text-white text-center">
+              Match History
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {matchHistory
+              .filter((game: any) => game.winner !== null)
+              .sort((a: any, b: any) => a.gameNumber - b.gameNumber)
+              .map((game: any) => {
+                // Calculate statistics for this game
+                const gameHistory = game.gameHistory || [];
+                
+                // Calculate scores
+                let homeScore = 0;
+                let awayScore = 0;
+                
+                // Calculate player statistics
+                const playerStats: Record<string, { throws: number; hits: number; hitRate: number }> = {};
+                
+                gameHistory.forEach((action: any) => {
+                  if (!action.playerId) return;
+                  
+                  if (!playerStats[action.playerId]) {
+                    playerStats[action.playerId] = { throws: 0, hits: 0, hitRate: 0 };
+                  }
+                  
+                  playerStats[action.playerId].throws++;
+                  if (action.type === 'hit') {
+                    playerStats[action.playerId].hits++;
+                    if (action.team === 'home') {
+                      homeScore++;
+                    } else {
+                      awayScore++;
+                    }
+                  }
+                });
+                
+                // Calculate hit rates
+                Object.keys(playerStats).forEach(playerId => {
+                  const stats = playerStats[playerId];
+                  stats.hitRate = stats.throws > 0 ? Math.round((stats.hits / stats.throws) * 100) : 0;
+                });
+                
+                // For 1v1, calculate stats by team instead of by player ID
+                let homePlayers: Array<{ playerId: string; stats: { throws: number; hits: number; hitRate: number } }> = [];
+                let awayPlayers: Array<{ playerId: string; stats: { throws: number; hits: number; hitRate: number } }> = [];
+                
+                if (match.type === '1on1') {
+                  // For 1v1, aggregate stats by team
+                  const homeTeamStats = { throws: 0, hits: 0, hitRate: 0 };
+                  const awayTeamStats = { throws: 0, hits: 0, hitRate: 0 };
+                  
+                  gameHistory.forEach((action: any) => {
+                    if (!action.team) return;
+                    if (action.team === 'home') {
+                      homeTeamStats.throws++;
+                      if (action.type === 'hit') {
+                        homeTeamStats.hits++;
+                      }
+                    } else {
+                      awayTeamStats.throws++;
+                      if (action.type === 'hit') {
+                        awayTeamStats.hits++;
+                      }
+                    }
+                  });
+                  
+                  homeTeamStats.hitRate = homeTeamStats.throws > 0 
+                    ? Math.round((homeTeamStats.hits / homeTeamStats.throws) * 100) 
+                    : 0;
+                  awayTeamStats.hitRate = awayTeamStats.throws > 0 
+                    ? Math.round((awayTeamStats.hits / awayTeamStats.throws) * 100) 
+                    : 0;
+                  
+                  // Create player entries for 1v1
+                  homePlayers = [{ playerId: 'home', stats: homeTeamStats }];
+                  awayPlayers = [{ playerId: 'away', stats: awayTeamStats }];
+                } else {
+                  // For 2v2, group players by team using player IDs
+                  // Find all unique player IDs from gameHistory and group by team
+                  const playerIdToTeam: Record<string, 'home' | 'away'> = {};
+                  gameHistory.forEach((action: any) => {
+                    if (action.playerId && action.team) {
+                      playerIdToTeam[action.playerId] = action.team;
+                    }
+                  });
+                  
+                  // Group players by team
+                  Object.keys(playerStats).forEach(playerId => {
+                    const team = playerIdToTeam[playerId] || 'home';
+                    if (team === 'home') {
+                      homePlayers.push({ playerId, stats: playerStats[playerId] });
+                    } else {
+                      awayPlayers.push({ playerId, stats: playerStats[playerId] });
+                    }
+                  });
+                }
+                
+                // Get player name helper
+                const getPlayerName = (playerId: string, team: 'home' | 'away', index: number) => {
+                  if (match.type === '1on1') {
+                    return team === 'home' 
+                      ? (match.homePlayerName || 'Home Player')
+                      : (match.awayPlayerName || 'Away Player');
+                  } else {
+                    // For 2v2, use index to determine which player
+                    if (team === 'home') {
+                      return index === 0 
+                        ? (match.homePlayer1Name || 'Home Player 1')
+                        : (match.homePlayer2Name || 'Home Player 2');
+                    } else {
+                      return index === 0
+                        ? (match.awayPlayer1Name || 'Away Player 1')
+                        : (match.awayPlayer2Name || 'Away Player 2');
+                    }
+                  }
+                };
+                
+                return (
+                  <motion.div
+                    key={game.gameNumber}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="p-6 bg-white/5 border border-white/10 rounded-lg"
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xl font-bold text-white">
+                        Game {game.gameNumber}
+                      </h3>
+                      <div className="flex items-center gap-4">
+                        <span className={`text-lg font-semibold ${
+                          game.winner === 'home' ? 'text-[#ff073a]' : 'text-white/70'
+                        }`}>
+                          {homeScore}
+                        </span>
+                        <span className="text-white/50">-</span>
+                        <span className={`text-lg font-semibold ${
+                          game.winner === 'away' ? 'text-[#ff073a]' : 'text-white/70'
+                        }`}>
+                          {awayScore}
+                        </span>
+                        <span className="text-sm text-white/60">
+                          ({game.winner === 'home' ? playerNames.home[0] : playerNames.away[0]} won)
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                      {/* Home Team Stats */}
+                      <div className="space-y-2">
+                        <h4 className="text-sm font-semibold text-white/90 mb-2">
+                          {match.type === '1on1' 
+                            ? (match.homePlayerName || 'Home Player')
+                            : (match.homeTeamName || 'Home Team')}
+                        </h4>
+                        {homePlayers.length > 0 ? (
+                          homePlayers.map((player, idx) => {
+                            const playerName = getPlayerName(player.playerId, 'home', idx);
+                            return (
+                              <div key={player.playerId} className="flex items-center justify-between p-2 bg-white/5 rounded">
+                                <span className="text-white/80 text-sm">{playerName}</span>
+                                <span className="text-white/70 text-sm">
+                                  {player.stats.hits}/{player.stats.throws} ({player.stats.hitRate}%)
+                                </span>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="text-white/60 text-sm p-2">No throws recorded</div>
+                        )}
+                      </div>
+                      
+                      {/* Away Team Stats */}
+                      <div className="space-y-2">
+                        <h4 className="text-sm font-semibold text-white/90 mb-2">
+                          {match.type === '1on1'
+                            ? (match.awayPlayerName || 'Away Player')
+                            : (match.awayTeamName || 'Away Team')}
+                        </h4>
+                        {awayPlayers.length > 0 ? (
+                          awayPlayers.map((player, idx) => {
+                            const playerName = getPlayerName(player.playerId, 'away', idx);
+                            return (
+                              <div key={player.playerId} className="flex items-center justify-between p-2 bg-white/5 rounded">
+                                <span className="text-white/80 text-sm">{playerName}</span>
+                                <span className="text-white/70 text-sm">
+                                  {player.stats.hits}/{player.stats.throws} ({player.stats.hitRate}%)
+                                </span>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="text-white/60 text-sm p-2">No throws recorded</div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Throws Timeline */}
+                    {gameHistory.length > 0 && (
+                      <div className="mt-6">
+                        <h4 className="text-sm font-semibold text-white/90 mb-4">Throws Timeline</h4>
+                        <div 
+                          className="relative overflow-x-auto overflow-y-visible" 
+                          style={{ 
+                            minHeight: '280px', 
+                            paddingBottom: '60px', 
+                            paddingTop: '60px',
+                            scrollbarWidth: 'thin',
+                            scrollbarColor: '#ff073a #0a0a0a'
+                          }}
+                        >
+                          {/* Center line */}
+                          <div 
+                            className="absolute left-0 right-0 h-0.5 bg-white/20 z-0 pointer-events-none" 
+                            style={{ 
+                              top: 'calc(50% - 1px)'
+                            }} 
+                          />
+                          
+                          <div className="flex items-center gap-4 min-w-max px-4" style={{ minHeight: '280px' }}>
+                            {gameHistory.map((action: any, index: number) => {
+                              const isHome = action.team === 'home';
+                              const isMade = action.type === 'hit';
+                              
+                              // Calculate score up to this point
+                              const score = calculateScoreUpTo(
+                                gameHistory.slice(0, index + 1).map((a: any) => ({
+                                  team: a.team,
+                                  made: a.type === 'hit'
+                                })),
+                                index
+                              );
+                              const scoreText = `${score.home}-${score.away}`;
+                              
+                              // Get player name
+                              const playerName = getPlayerName(action.playerId, action.team, 
+                                action.team === 'home' 
+                                  ? homePlayers.findIndex(p => p.playerId === action.playerId)
+                                  : awayPlayers.findIndex(p => p.playerId === action.playerId)
+                              );
+                              
+                              return (
+                                <motion.div
+                                  key={`${action.playerId}-${action.timestamp}-${index}`}
+                                  initial={{ opacity: 0, scale: 0 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  transition={{ 
+                                    delay: 0,
+                                    duration: 0.2,
+                                    type: "spring",
+                                    stiffness: 400,
+                                    damping: 25
+                                  }}
+                                  className="flex flex-col items-center gap-1 relative z-10"
+                                  style={{
+                                    marginTop: isHome ? '-120px' : '0px',
+                                    marginBottom: isHome ? '0px' : '-120px',
+                                  }}
+                                >
+                                  {isHome ? (
+                                    <div className="text-center mb-1">
+                                      <div className="text-white/70 text-xs leading-tight">{playerName}</div>
+                                      <div className="text-white/60 text-xs">{scoreText}</div>
+                                    </div>
+                                  ) : null}
+                                  
+                                  <div
+                                    className={`w-12 h-12 rounded-full border-2 flex items-center justify-center relative transition-all hover:scale-110 ${
+                                      isMade 
+                                        ? "bg-green-500 border-green-400 shadow-lg shadow-green-500/50" 
+                                        : "bg-red-500 border-red-400 shadow-lg shadow-red-500/50"
+                                    }`}
+                                  >
+                                    <div
+                                      className={`absolute w-0 h-0 border-l-[10px] border-r-[10px] border-l-transparent border-r-transparent ${
+                                        isHome 
+                                          ? "top-full mt-2 border-t-[12px] border-t-white/40"
+                                          : "bottom-full mb-2 border-b-[12px] border-b-white/40"
+                                      }`}
+                                    />
+                                    <span className="text-white text-sm font-bold">
+                                      {isMade ? '✓' : '✗'}
+                                    </span>
+                                  </div>
+                                  
+                                  {!isHome ? (
+                                    <div className="text-center mt-1">
+                                      <div className="text-white/70 text-xs leading-tight">{playerName}</div>
+                                      <div className="text-white/60 text-xs">{scoreText}</div>
+                                    </div>
+                                  ) : null}
+                                </motion.div>
+                              );
+                            })}
+                            
+                            {gameHistory.length === 0 && (
+                              <div className="flex items-center justify-center w-full py-8">
+                                <p className="text-white/50 text-sm">No throws recorded</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                );
+              })}
+          </CardContent>
+        </Card>
+        );
+      })()}
 
       {error && (
         <div className="p-4 bg-[#ff073a]/20 border border-[#ff073a]/30 rounded-lg">

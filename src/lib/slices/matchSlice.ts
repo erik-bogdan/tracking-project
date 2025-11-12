@@ -238,6 +238,46 @@ export const startMatch = createAsyncThunk(
   }
 );
 
+export const syncTracking = createAsyncThunk(
+  'match/syncTracking',
+  async ({ matchId, trackingData }: { matchId: string; trackingData: any }, { rejectWithValue }) => {
+    try {
+      const result = await api.match.tracking.sync.put({ matchId, trackingData });
+      if (result.data && !result.data.success) {
+        return rejectWithValue(result.data.error || 'Failed to sync tracking data');
+      }
+      return result.data?.data;
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Failed to sync tracking data');
+    }
+  }
+);
+
+export const finishTracking = createAsyncThunk(
+  'match/finishTracking',
+  async ({ matchId, trackingData }: { matchId: string; trackingData?: any }, { rejectWithValue }) => {
+    try {
+      const result = await api.match.tracking.finish.put({ matchId, ...(trackingData ? { trackingData } : {}) });
+      if (result.data && !result.data.success) {
+        return rejectWithValue(result.data.error || 'Failed to finish tracking');
+      }
+      // Convert date fields to ISO strings for serialization
+      const match = result.data?.data;
+      if (match) {
+        return {
+          ...match,
+          date: match.date instanceof Date ? match.date.toISOString() : match.date,
+          createdAt: match.createdAt instanceof Date ? match.createdAt.toISOString() : match.createdAt,
+          updatedAt: match.updatedAt instanceof Date ? match.updatedAt.toISOString() : match.updatedAt,
+        };
+      }
+      return match;
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Failed to finish tracking');
+    }
+  }
+);
+
 export const { clearError, clearMatches } = matchSlice.actions;
 export default matchSlice.reducer;
 

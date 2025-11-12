@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MatchCard } from "@/components/dashboard/match-card";
-import { Calendar, MapPin, ChevronDown, Clock, Plus, ExternalLink } from "lucide-react";
+import { Calendar, MapPin, ChevronDown, Clock, Plus, ExternalLink, Edit } from "lucide-react";
 import Link from "next/link";
 import { Event, convertMatch, DatabaseMatch } from "@/types/match";
 import { cn } from "@/lib/utils";
@@ -28,12 +28,15 @@ export function EventCard({ event, index = 0, variant = "default" }: EventCardPr
   const eventMatches = allMatches.filter(m => m.eventId === event.id);
   const convertedMatches = eventMatches.map(convertMatch);
 
-  // Load matches when card opens or when matches might have changed
+  // Don't fetch matches here - they should already be loaded by the dashboard page
+  // Only fetch if we're in a context where matches aren't pre-loaded (e.g., events list page)
+  // For dashboard variant, matches are already loaded by the parent component
   useEffect(() => {
-    if (isOpen) {
+    // Only fetch if variant is not dashboard (dashboard page handles fetching)
+    if (isOpen && variant !== 'dashboard') {
       dispatch(fetchMatches(event.id));
     }
-  }, [isOpen, dispatch, event.id]);
+  }, [isOpen, dispatch, event.id, variant]);
 
   return (
     <motion.div
@@ -107,6 +110,17 @@ export function EventCard({ event, index = 0, variant = "default" }: EventCardPr
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Link href={`/dashboard/events/${event.id}/edit`}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="bg-white/5 border-[#ff073a]/30 text-white hover:bg-[#ff073a]/10"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Edit className="h-4 w-4 mr-1" />
+                  Edit
+                </Button>
+              </Link>
               <Link href={`/dashboard/events/${event.id}/matches/new`}>
                 <Button
                   variant="default"

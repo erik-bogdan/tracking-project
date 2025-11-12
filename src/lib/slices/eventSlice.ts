@@ -45,7 +45,17 @@ export const createEvent = createAsyncThunk(
       if (result.data && !result.data.success) {
         return rejectWithValue(result.data.error || 'Failed to create event');
       }
-      return result.data?.data;
+      // Convert date fields to ISO strings for serialization
+      const event = result.data?.data;
+      if (event) {
+        return {
+          ...event,
+          date: event.date instanceof Date ? event.date.toISOString() : event.date,
+          createdAt: event.createdAt instanceof Date ? event.createdAt.toISOString() : event.createdAt,
+          updatedAt: event.updatedAt instanceof Date ? event.updatedAt.toISOString() : event.updatedAt,
+        };
+      }
+      return event;
     } catch (error: any) {
       return rejectWithValue(error.message || 'Failed to create event');
     }

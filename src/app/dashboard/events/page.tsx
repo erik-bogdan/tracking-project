@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
 import { EventCard } from "@/components/dashboard/event-card";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
@@ -13,6 +13,15 @@ import Link from "next/link";
 export default function EventsPage() {
   const dispatch = useAppDispatch();
   const { events, isLoading, error } = useAppSelector((state) => state.event);
+
+  // Sort events by createdAt (newest first)
+  const sortedEvents = useMemo(() => {
+    return [...events].sort((a, b) => {
+      const dateA = new Date(a.createdAt || 0).getTime();
+      const dateB = new Date(b.createdAt || 0).getTime();
+      return dateB - dateA; // Descending order (newest first)
+    });
+  }, [events]);
 
   useEffect(() => {
     dispatch(fetchEvents());
@@ -58,12 +67,12 @@ export default function EventsPage() {
       )}
 
       <div className="space-y-6">
-        {events.length === 0 ? (
+        {sortedEvents.length === 0 ? (
           <div className="text-center py-12 text-white/40">
             <p>No events found. Create your first event to get started.</p>
           </div>
         ) : (
-          events.map((event, idx) => {
+          sortedEvents.map((event, idx) => {
             // Convert event to match Event interface - ensure UUID is properly passed
             const eventForCard: Event = {
               id: event.id, // UUID string

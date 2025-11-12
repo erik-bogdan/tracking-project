@@ -1,6 +1,6 @@
 import Elysia, { t } from "elysia";
 import { db } from "../lib/db";
-import { event } from "../database/schema";
+import { event, match } from "../database/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "../lib/auth";
 
@@ -117,6 +117,62 @@ export const eventController = new Elysia({ prefix: '/event' })
             return {
                 success: false,
                 error: error.message || 'Failed to fetch event',
+            };
+        }
+    })
+    .get('/public/:id/matches', async ({ params }) => {
+        try {
+            const eventId = params.id;
+            
+            // Verify event exists
+            const events = await db.select().from(event)
+                .where(eq(event.id, eventId))
+                .limit(1);
+            
+            if (events.length === 0) {
+                return {
+                    success: false,
+                    error: 'Event not found',
+                };
+            }
+
+            // Get matches for this event, ordered by date
+            const matches = await db.select().from(match)
+                .where(eq(match.eventId, eventId))
+                .orderBy(match.date);
+            
+            // Return only public match data
+            return {
+                success: true,
+                data: matches.map(m => ({
+                    id: m.id,
+                    type: m.type,
+                    status: m.status,
+                    date: m.date,
+                    // 1v1 fields
+                    homePlayerName: m.homePlayerName,
+                    awayPlayerName: m.awayPlayerName,
+                    // 2v2 fields
+                    homeTeamName: m.homeTeamName,
+                    homePlayer1Name: m.homePlayer1Name,
+                    homePlayer2Name: m.homePlayer2Name,
+                    awayTeamName: m.awayTeamName,
+                    awayPlayer1Name: m.awayPlayer1Name,
+                    awayPlayer2Name: m.awayPlayer2Name,
+                    // Scores
+                    homeScore: m.homeScore,
+                    awayScore: m.awayScore,
+                    bestOf: m.bestOf,
+                    // Tracking data (public, for live display)
+                    trackingData: m.trackingData,
+                    // Don't return eventId, createdAt, updatedAt
+                })),
+            };
+        } catch (error: any) {
+            console.error('Error fetching public matches:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to fetch matches',
             };
         }
     })

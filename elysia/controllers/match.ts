@@ -158,6 +158,176 @@ export const matchController = new Elysia({ prefix: '/match' })
             eventId: t.String(),
         }),
     })
+    .put('/tracking/sync', async ({ body, request }) => {
+        try {
+            // Get session from better-auth
+            const session = await auth.api.getSession({ headers: request.headers });
+            
+            if (!session?.user?.id) {
+                return {
+                    success: false,
+                    error: 'Unauthorized',
+                };
+            }
+
+            const userId = session.user.id;
+            const matchId = body.matchId;
+
+            if (!matchId) {
+                return {
+                    success: false,
+                    error: 'matchId is required',
+                };
+            }
+
+            // Get match
+            const matches = await db.select().from(match)
+                .where(eq(match.id, matchId))
+                .limit(1);
+
+            if (matches.length === 0) {
+                return {
+                    success: false,
+                    error: 'Match not found',
+                };
+            }
+
+            const matchData = matches[0];
+
+            // Verify event belongs to user
+            const eventData = await db.select().from(event)
+                .where(and(
+                    eq(event.id, matchData.eventId),
+                    eq(event.userId, userId)
+                ))
+                .limit(1);
+
+            if (eventData.length === 0) {
+                return {
+                    success: false,
+                    error: 'Unauthorized',
+                };
+            }
+
+            // Update match with tracking data
+            const updatedMatch = await db.update(match)
+                .set({
+                    trackingData: body.trackingData,
+                    // Update scores if available in trackingData
+                    homeScore: body.trackingData?.gameState?.homeScore ?? matchData.homeScore,
+                    awayScore: body.trackingData?.gameState?.awayScore ?? matchData.awayScore,
+                    updatedAt: new Date(),
+                })
+                .where(eq(match.id, matchId))
+                .returning();
+
+            return {
+                success: true,
+                data: updatedMatch[0],
+            };
+        } catch (error: any) {
+            console.error('Error syncing tracking data:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to sync tracking data',
+            };
+        }
+    }, {
+        body: t.Object({
+            matchId: t.String(),
+            trackingData: t.Any(), // JSONB accepts any JSON structure
+        }),
+    })
+    .put('/tracking/finish', async ({ body, request }) => {
+        try {
+            // Get session from better-auth
+            const session = await auth.api.getSession({ headers: request.headers });
+            
+            if (!session?.user?.id) {
+                return {
+                    success: false,
+                    error: 'Unauthorized',
+                };
+            }
+
+            const userId = session.user.id;
+            const matchId = body.matchId;
+
+            if (!matchId) {
+                return {
+                    success: false,
+                    error: 'matchId is required',
+                };
+            }
+
+            // Get match
+            const matches = await db.select().from(match)
+                .where(eq(match.id, matchId))
+                .limit(1);
+
+            if (matches.length === 0) {
+                return {
+                    success: false,
+                    error: 'Match not found',
+                };
+            }
+
+            const matchData = matches[0];
+
+            // Verify event belongs to user
+            const eventData = await db.select().from(event)
+                .where(and(
+                    eq(event.id, matchData.eventId),
+                    eq(event.userId, userId)
+                ))
+                .limit(1);
+
+            if (eventData.length === 0) {
+                return {
+                    success: false,
+                    error: 'Unauthorized',
+                };
+            }
+
+            // Update match: finish tracking and set status to finished
+            const updateData: any = {
+                status: 'finished',
+                updatedAt: new Date(),
+            };
+
+            // Update tracking data if provided
+            if (body.trackingData) {
+                updateData.trackingData = body.trackingData;
+            }
+
+            // Update scores if available
+            if (body.trackingData?.gameState) {
+                updateData.homeScore = body.trackingData.gameState.homeScore ?? matchData.homeScore;
+                updateData.awayScore = body.trackingData.gameState.awayScore ?? matchData.awayScore;
+            }
+
+            const updatedMatch = await db.update(match)
+                .set(updateData)
+                .where(eq(match.id, matchId))
+                .returning();
+
+            return {
+                success: true,
+                data: updatedMatch[0],
+            };
+        } catch (error: any) {
+            console.error('Error finishing tracking:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to finish tracking',
+            };
+        }
+    }, {
+        body: t.Object({
+            matchId: t.String(),
+            trackingData: t.Optional(t.Any()),
+        }),
+    })
     .get('/:id', async ({ params, request }) => {
         try {
             // Get session from better-auth
