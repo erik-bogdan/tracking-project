@@ -7,6 +7,7 @@ export const mockEvents: Event[] = [
     description: "Fun weekend beerpong tournament",
     date: "2025-11-09",
     location: "Budapest, Hungary",
+    type: "1on1",
     matches: [
       {
         id: "m1",
@@ -68,6 +69,7 @@ export const mockEvents: Event[] = [
     description: "Final championship event",
     date: "2025-11-15",
     location: "Budapest, Hungary",
+    type: "2on2",
     matches: [
       {
         id: "m5",
@@ -105,7 +107,7 @@ export function getUpcomingEvent(): Event | null {
 }
 
 export function getUpcomingMatches(event: Event | null): Match[] {
-  if (!event) return [];
+  if (!event || !event.matches) return [];
   
   const today = new Date();
   const upcomingMatches = event.matches.filter((match) => {

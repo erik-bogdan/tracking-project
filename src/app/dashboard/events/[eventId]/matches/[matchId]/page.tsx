@@ -598,7 +598,7 @@ export default function MatchPage() {
           )}
 
           {/* Finish Match Button - show if match is live and tracking shows match ended */}
-          {match?.status === 'live' && trackingState?.matchEnded && match?.status !== 'finished' && (
+          {match?.status === 'live' && trackingState?.matchEnded && (
             <div className="pt-4 border-t border-white/20">
               <Button
                 onClick={handleFinishMatch}
@@ -744,24 +744,105 @@ export default function MatchPage() {
                   homePlayers = [{ playerId: 'home', stats: homeTeamStats }];
                   awayPlayers = [{ playerId: 'away', stats: awayTeamStats }];
                 } else {
-                  // For 2v2, group players by team using player IDs
-                  // Find all unique player IDs from gameHistory and group by team
-                  const playerIdToTeam: Record<string, 'home' | 'away'> = {};
+                  // For 2v2, use gameState player IDs as the source of truth
+                  // Get gameState from trackingState or match.trackingData
+                  const gameState = trackingState || (match.trackingData && (match.trackingData as any).gameState) || {};
+                  
+                  // Get player IDs from gameState
+                  const homeFirstPlayerId = gameState.homeFirstPlayer;
+                  const homeSecondPlayerId = gameState.homeSecondPlayer;
+                  const awayFirstPlayerId = gameState.awayFirstPlayer;
+                  const awaySecondPlayerId = gameState.awaySecondPlayer;
+                  
+                  // Track which player IDs we've seen for each team from gameHistory
+                  const homePlayerIdsSeen = new Set<string>();
+                  const awayPlayerIdsSeen = new Set<string>();
+                  
                   gameHistory.forEach((action: any) => {
-                    if (action.playerId && action.team) {
-                      playerIdToTeam[action.playerId] = action.team;
+                    if (!action.playerId || !action.team) return;
+                    if (action.team === 'home') {
+                      homePlayerIdsSeen.add(action.playerId);
+                    } else if (action.team === 'away') {
+                      awayPlayerIdsSeen.add(action.playerId);
                     }
                   });
                   
-                  // Group players by team
-                  Object.keys(playerStats).forEach(playerId => {
-                    const team = playerIdToTeam[playerId] || 'home';
-                    if (team === 'home') {
-                      homePlayers.push({ playerId, stats: playerStats[playerId] });
-                    } else {
-                      awayPlayers.push({ playerId, stats: playerStats[playerId] });
+                  // Create mapping from gameHistory playerId to gameState player ID
+                  const playerIdMapping: Record<string, string> = {};
+                  const homePlayerIdsArray = Array.from(homePlayerIdsSeen);
+                  const awayPlayerIdsArray = Array.from(awayPlayerIdsSeen);
+                  
+                  // Map home team player IDs
+                  if (homePlayerIdsArray.length > 0 && homeFirstPlayerId) {
+                    playerIdMapping[homePlayerIdsArray[0]] = homeFirstPlayerId;
+                  }
+                  if (homePlayerIdsArray.length > 1 && homeSecondPlayerId) {
+                    playerIdMapping[homePlayerIdsArray[1]] = homeSecondPlayerId;
+                  }
+                  
+                  // Map away team player IDs
+                  if (awayPlayerIdsArray.length > 0 && awayFirstPlayerId) {
+                    playerIdMapping[awayPlayerIdsArray[0]] = awayFirstPlayerId;
+                  }
+                  if (awayPlayerIdsArray.length > 1 && awaySecondPlayerId) {
+                    playerIdMapping[awayPlayerIdsArray[1]] = awaySecondPlayerId;
+                  }
+                  
+                  // Recalculate playerStats using mapped IDs
+                  const mappedPlayerStats: Record<string, { throws: number; hits: number; hitRate: number }> = {};
+                  
+                  // Initialize stats for all known players
+                  if (homeFirstPlayerId) {
+                    mappedPlayerStats[homeFirstPlayerId] = { throws: 0, hits: 0, hitRate: 0 };
+                  }
+                  if (homeSecondPlayerId) {
+                    mappedPlayerStats[homeSecondPlayerId] = { throws: 0, hits: 0, hitRate: 0 };
+                  }
+                  if (awayFirstPlayerId) {
+                    mappedPlayerStats[awayFirstPlayerId] = { throws: 0, hits: 0, hitRate: 0 };
+                  }
+                  if (awaySecondPlayerId) {
+                    mappedPlayerStats[awaySecondPlayerId] = { throws: 0, hits: 0, hitRate: 0 };
+                  }
+                  
+                  // Map stats from gameHistory playerId to gameState player ID
+                  gameHistory.forEach((action: any) => {
+                    if (!action.playerId) return;
+                    
+                    const mappedPlayerId = playerIdMapping[action.playerId] || (
+                      action.playerId === homeFirstPlayerId || action.playerId === homeSecondPlayerId ||
+                      action.playerId === awayFirstPlayerId || action.playerId === awaySecondPlayerId
+                        ? action.playerId
+                        : null
+                    );
+                    
+                    if (!mappedPlayerId || !mappedPlayerStats[mappedPlayerId]) return;
+                    
+                    mappedPlayerStats[mappedPlayerId].throws++;
+                    if (action.type === 'hit') {
+                      mappedPlayerStats[mappedPlayerId].hits++;
                     }
                   });
+                  
+                  // Calculate hit rates
+                  Object.keys(mappedPlayerStats).forEach(playerId => {
+                    const stats = mappedPlayerStats[playerId];
+                    stats.hitRate = stats.throws > 0 ? Math.round((stats.hits / stats.throws) * 100) : 0;
+                  });
+                  
+                  // Group players by team using mapped stats
+                  if (homeFirstPlayerId && mappedPlayerStats[homeFirstPlayerId]) {
+                    homePlayers.push({ playerId: homeFirstPlayerId, stats: mappedPlayerStats[homeFirstPlayerId] });
+                  }
+                  if (homeSecondPlayerId && mappedPlayerStats[homeSecondPlayerId]) {
+                    homePlayers.push({ playerId: homeSecondPlayerId, stats: mappedPlayerStats[homeSecondPlayerId] });
+                  }
+                  if (awayFirstPlayerId && mappedPlayerStats[awayFirstPlayerId]) {
+                    awayPlayers.push({ playerId: awayFirstPlayerId, stats: mappedPlayerStats[awayFirstPlayerId] });
+                  }
+                  if (awaySecondPlayerId && mappedPlayerStats[awaySecondPlayerId]) {
+                    awayPlayers.push({ playerId: awaySecondPlayerId, stats: mappedPlayerStats[awaySecondPlayerId] });
+                  }
                 }
                 
                 // Get player name helper

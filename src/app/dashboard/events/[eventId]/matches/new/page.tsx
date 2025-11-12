@@ -60,7 +60,7 @@ export default function NewMatchPage() {
     formState: { errors },
     watch,
     setValue,
-  } = useForm<MatchFormData>({
+  } = useForm({
     resolver: zodResolver(matchSchema),
     defaultValues: {
       dateTime: "",
@@ -230,9 +230,9 @@ export default function NewMatchPage() {
                   const dateValue = field.value ? new Date(field.value) : undefined;
                   return (
                     <DateTimePicker
-                      value={dateValue}
+                      value={dateValue && !isNaN(dateValue.getTime()) ? dateValue : undefined}
                       onChange={(date) => {
-                        if (date) {
+                        if (date && !isNaN(date.getTime())) {
                           field.onChange(date.toISOString());
                         } else {
                           field.onChange("");

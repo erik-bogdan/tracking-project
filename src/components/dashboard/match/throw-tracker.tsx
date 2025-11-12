@@ -23,9 +23,10 @@ interface Player {
 }
 
 // Convert string arrays to Player objects
-function convertToPlayers(players: string[]): Player[] {
+// For 2v2, use team-prefixed IDs to avoid conflicts between home and away players
+function convertToPlayers(players: string[], team?: 'home' | 'away'): Player[] {
   return players.map((name, index) => ({
-    id: `player-${index}`,
+    id: team ? `${team}-player-${index}` : `player-${index}`,
     label: name
   }));
 }
@@ -43,8 +44,9 @@ export function ThrowTracker({
   className 
 }: ThrowTrackerProps) {
   // Convert string arrays to Player objects
-  const homePlayersObj = convertToPlayers(homePlayers);
-  const awayPlayersObj = convertToPlayers(awayPlayers);
+  // For 2v2, use team-prefixed IDs to avoid conflicts
+  const homePlayersObj = matchType === '2on2' ? convertToPlayers(homePlayers, 'home') : convertToPlayers(homePlayers);
+  const awayPlayersObj = matchType === '2on2' ? convertToPlayers(awayPlayers, 'away') : convertToPlayers(awayPlayers);
 
   if (matchType === '1on1') {
     // 1v1 mode

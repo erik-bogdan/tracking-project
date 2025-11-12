@@ -16,24 +16,28 @@ interface DateTimePickerProps {
 }
 
 export function DateTimePicker({ value, onChange, className }: DateTimePickerProps) {
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(value);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(
+    value && !isNaN(value.getTime()) ? value : undefined
+  );
   const [selectedHour, setSelectedHour] = useState<string>(
-    value ? String(value.getHours()).padStart(2, "0") : "12"
+    value && !isNaN(value.getTime()) ? String(value.getHours()).padStart(2, "0") : "12"
   );
   const [selectedMinute, setSelectedMinute] = useState<string>(
-    value ? String(value.getMinutes()).padStart(2, "0") : "00"
+    value && !isNaN(value.getTime()) ? String(value.getMinutes()).padStart(2, "0") : "00"
   );
 
   useEffect(() => {
-    if (value) {
+    if (value && !isNaN(value.getTime())) {
       setSelectedDate(value);
       setSelectedHour(String(value.getHours()).padStart(2, "0"));
       setSelectedMinute(String(value.getMinutes()).padStart(2, "0"));
+    } else if (!value) {
+      setSelectedDate(undefined);
     }
   }, [value]);
 
   const handleDateSelect = (date: Date | undefined) => {
-    if (date) {
+    if (date && !isNaN(date.getTime())) {
       const newDate = new Date(date);
       newDate.setHours(parseInt(selectedHour), parseInt(selectedMinute));
       setSelectedDate(newDate);
@@ -48,7 +52,7 @@ export function DateTimePicker({ value, onChange, className }: DateTimePickerPro
     const hourValue = hour ?? selectedHour;
     const minuteValue = minute ?? selectedMinute;
     
-    if (selectedDate) {
+    if (selectedDate && !isNaN(selectedDate.getTime())) {
       const newDate = new Date(selectedDate);
       newDate.setHours(parseInt(hourValue), parseInt(minuteValue));
       setSelectedDate(newDate);
@@ -77,7 +81,7 @@ export function DateTimePicker({ value, onChange, className }: DateTimePickerPro
             )}
           >
             <CalendarIcon className="mr-2 h-4 w-4" />
-            {selectedDate ? (
+            {selectedDate && !isNaN(selectedDate.getTime()) ? (
               format(selectedDate, "PPP HH:mm")
             ) : (
               <span className="text-white/50">Pick a date</span>
@@ -87,7 +91,7 @@ export function DateTimePicker({ value, onChange, className }: DateTimePickerPro
         <PopoverContent className="w-auto p-0 bg-[#0a0a0a] border-[#ff073a]/30" align="start">
           <Calendar
             mode="single"
-            selected={selectedDate}
+            selected={selectedDate && !isNaN(selectedDate.getTime()) ? selectedDate : undefined}
             onSelect={handleDateSelect}
             initialFocus
             className="bg-[#0a0a0a]"

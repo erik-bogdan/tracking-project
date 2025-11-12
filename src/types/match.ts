@@ -112,8 +112,8 @@ export function convertMatch(dbMatch: DatabaseMatch): Match {
     },
     score: dbMatch.homeScore !== null && dbMatch.awayScore !== null
       ? {
-          team1: dbMatch.homeScore,
-          team2: dbMatch.awayScore,
+          team1: dbMatch.homeScore as number,
+          team2: dbMatch.awayScore as number,
         }
       : undefined,
   };

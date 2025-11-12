@@ -37,7 +37,7 @@ export const createMatch = createAsyncThunk(
   'match/createMatch',
   async (payload: CreateMatchPayload, { rejectWithValue }) => {
     try {
-      const result = await api.match.create.post(payload);
+      const result = await (api as any).match.create.post(payload);
       if (result.data && !result.data.success) {
         return rejectWithValue(result.data.error || 'Failed to create match');
       }
@@ -62,7 +62,7 @@ export const fetchMatches = createAsyncThunk(
   'match/fetchMatches',
   async (eventId: string, { rejectWithValue }) => {
     try {
-      const result = await api.match.list.get({ query: { eventId } });
+      const result = await (api as any).match.list.get({ query: { eventId } });
       if (result.data && !result.data.success) {
         return rejectWithValue(result.data.error || 'Failed to fetch matches');
       }
@@ -100,14 +100,8 @@ const matchSlice = createSlice({
       })
       .addCase(createMatch.fulfilled, (state, action: PayloadAction<Match>) => {
         state.isLoading = false;
-        // Convert date fields to ISO strings for serialization (already done in thunk, but ensure it)
-        const match = {
-          ...action.payload,
-          date: action.payload.date instanceof Date ? action.payload.date.toISOString() : action.payload.date,
-          createdAt: action.payload.createdAt instanceof Date ? action.payload.createdAt.toISOString() : action.payload.createdAt,
-          updatedAt: action.payload.updatedAt instanceof Date ? action.payload.updatedAt.toISOString() : action.payload.updatedAt,
-        };
-        state.matches.push(match);
+        // Date fields are already strings from the thunk
+        state.matches.push(action.payload);
       })
       .addCase(createMatch.rejected, (state, action) => {
         state.isLoading = false;
@@ -121,15 +115,9 @@ const matchSlice = createSlice({
       .addCase(fetchMatches.fulfilled, (state, action: PayloadAction<{ eventId: string; matches: Match[] }>) => {
         state.isLoading = false;
         // Remove existing matches for this event and add new ones
-        // Convert date fields to ISO strings for serialization (already done in thunk, but ensure it)
-        const convertedMatches = action.payload.matches.map((match) => ({
-          ...match,
-          date: match.date instanceof Date ? match.date.toISOString() : match.date,
-          createdAt: match.createdAt instanceof Date ? match.createdAt.toISOString() : match.createdAt,
-          updatedAt: match.updatedAt instanceof Date ? match.updatedAt.toISOString() : match.updatedAt,
-        }));
+        // Date fields are already strings from the thunk
         state.matches = state.matches.filter(m => m.eventId !== action.payload.eventId);
-        state.matches.push(...convertedMatches);
+        state.matches.push(...action.payload.matches);
       })
       .addCase(fetchMatches.rejected, (state, action) => {
         state.isLoading = false;
@@ -178,7 +166,7 @@ export const fetchMatch = createAsyncThunk(
   'match/fetchMatch',
   async (matchId: string, { rejectWithValue }) => {
     try {
-      const result = await api.match[matchId].get();
+      const result = await (api as any).match[matchId].get();
       if (result.data && !result.data.success) {
         return rejectWithValue(result.data.error || 'Failed to fetch match');
       }
@@ -206,7 +194,7 @@ export const startMatch = createAsyncThunk(
       console.log('startMatch thunk called with matchId:', matchId);
       console.log('API call:', `api.match.start.post({ matchId: '${matchId}' })`);
       
-      const result = await api.match.start.post({ matchId });
+      const result = await (api as any).match.start.post({ matchId });
       console.log('API result:', result);
       console.log('API result data:', result.data);
       
@@ -242,7 +230,7 @@ export const syncTracking = createAsyncThunk(
   'match/syncTracking',
   async ({ matchId, trackingData }: { matchId: string; trackingData: any }, { rejectWithValue }) => {
     try {
-      const result = await api.match.tracking.sync.put({ matchId, trackingData });
+      const result = await (api as any).match.tracking.sync.put({ matchId, trackingData });
       if (result.data && !result.data.success) {
         return rejectWithValue(result.data.error || 'Failed to sync tracking data');
       }
@@ -257,7 +245,7 @@ export const finishTracking = createAsyncThunk(
   'match/finishTracking',
   async ({ matchId, trackingData }: { matchId: string; trackingData?: any }, { rejectWithValue }) => {
     try {
-      const result = await api.match.tracking.finish.put({ matchId, ...(trackingData ? { trackingData } : {}) });
+      const result = await (api as any).match.tracking.finish.put({ matchId, ...(trackingData ? { trackingData } : {}) });
       if (result.data && !result.data.success) {
         return rejectWithValue(result.data.error || 'Failed to finish tracking');
       }

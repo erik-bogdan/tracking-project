@@ -92,21 +92,177 @@ export default function LiveEventOverlayPage() {
       ? (Number(gameState.awayScore || 0) + Number(gameState.otAway || 0))
       : Number(gameState.awayScore || 0));
 
-    // Calculate player statistics
+    // Calculate player statistics - use gameState player IDs as the source of truth
+    // For 2v2, we need to map gameHistory playerIds to gameState player IDs STRICTLY by team
     const playerStats: Record<string, { throws: number; hits: number; hitRate: number }> = {};
     
+    // First, get the correct player IDs from gameState
+    const homeFirstPlayerId = gameState.homeFirstPlayer || selectedPlayers.homeFirst;
+    const homeSecondPlayerId = gameState.homeSecondPlayer || selectedPlayers.homeSecond;
+    const awayFirstPlayerId = gameState.awayFirstPlayer || selectedPlayers.awayFirst;
+    const awaySecondPlayerId = gameState.awaySecondPlayer || selectedPlayers.awaySecond;
+    
+    // Initialize stats for all known players
+    if (homeFirstPlayerId) {
+      playerStats[homeFirstPlayerId] = { throws: 0, hits: 0, hitRate: 0 };
+    }
+    if (homeSecondPlayerId) {
+      playerStats[homeSecondPlayerId] = { throws: 0, hits: 0, hitRate: 0 };
+    }
+    if (awayFirstPlayerId) {
+      playerStats[awayFirstPlayerId] = { throws: 0, hits: 0, hitRate: 0 };
+    }
+    if (awaySecondPlayerId) {
+      playerStats[awaySecondPlayerId] = { throws: 0, hits: 0, hitRate: 0 };
+    }
+    
+    // Track which player IDs we've seen for each team from gameHistory
+    const homePlayerIdsSeen = new Set<string>();
+    const awayPlayerIdsSeen = new Set<string>();
+    
+    // First pass: identify unique player IDs per team from gameHistory
     gameHistory.forEach((action: any) => {
-      if (!action.playerId) return;
+      if (!action.playerId || !action.team) return;
       
-      if (!playerStats[action.playerId]) {
-        playerStats[action.playerId] = { throws: 0, hits: 0, hitRate: 0 };
-      }
-      
-      playerStats[action.playerId].throws++;
-      if (action.type === 'hit') {
-        playerStats[action.playerId].hits++;
+      if (action.team === 'home') {
+        homePlayerIdsSeen.add(action.playerId);
+      } else if (action.team === 'away') {
+        awayPlayerIdsSeen.add(action.playerId);
       }
     });
+    
+    // Create mapping: map gameHistory playerIds to gameState player IDs STRICTLY by team
+    const playerIdMapping: Record<string, string> = {};
+    
+    // Map home team: first unique home playerId -> homeFirstPlayerId, second -> homeSecondPlayerId
+    const homePlayerIdsArray = Array.from(homePlayerIdsSeen);
+    if (homePlayerIdsArray.length > 0 && homeFirstPlayerId) {
+      playerIdMapping[homePlayerIdsArray[0]] = homeFirstPlayerId;
+    }
+    if (homePlayerIdsArray.length > 1 && homeSecondPlayerId) {
+      playerIdMapping[homePlayerIdsArray[1]] = homeSecondPlayerId;
+    }
+    
+    // Map away team: first unique away playerId -> awayFirstPlayerId, second -> awaySecondPlayerId
+    const awayPlayerIdsArray = Array.from(awayPlayerIdsSeen);
+    if (awayPlayerIdsArray.length > 0 && awayFirstPlayerId) {
+      playerIdMapping[awayPlayerIdsArray[0]] = awayFirstPlayerId;
+    }
+    if (awayPlayerIdsArray.length > 1 && awaySecondPlayerId) {
+      playerIdMapping[awayPlayerIdsArray[1]] = awaySecondPlayerId;
+    }
+    
+    // Debug log
+    console.log('Player ID Mapping:', {
+      homePlayerIdsSeen: Array.from(homePlayerIdsSeen),
+      awayPlayerIdsSeen: Array.from(awayPlayerIdsSeen),
+      homePlayerIdsArray,
+      awayPlayerIdsArray,
+      playerIdMapping,
+      gameStatePlayerIds: {
+        homeFirst: homeFirstPlayerId,
+        homeSecond: homeSecondPlayerId,
+        awayFirst: awayFirstPlayerId,
+        awaySecond: awaySecondPlayerId
+      }
+    });
+    
+    // Now calculate stats - STRICTLY separate by team, use mapping
+    // The key insight: gameHistory playerIds might be the same for both teams,
+    // so we MUST use the team field to determine which gameState player ID to use
+    gameHistory.forEach((action: any) => {
+      if (!action.playerId || !action.team) return;
+      
+      // Get the mapped player ID based on team
+      let mappedPlayerId: string | null = null;
+      
+      if (action.team === 'home') {
+        // For home team, map based on position in homePlayerIdsArray
+        const indexInHomeArray = homePlayerIdsArray.indexOf(action.playerId);
+        if (indexInHomeArray === 0 && homeFirstPlayerId) {
+          mappedPlayerId = homeFirstPlayerId;
+        } else if (indexInHomeArray === 1 && homeSecondPlayerId) {
+          mappedPlayerId = homeSecondPlayerId;
+        } else if (indexInHomeArray === -1) {
+          // Not found in array, try direct mapping
+          mappedPlayerId = playerIdMapping[action.playerId] || null;
+          // If still no mapping, check if it's already a home player ID
+          if (!mappedPlayerId) {
+            if (action.playerId === homeFirstPlayerId) {
+              mappedPlayerId = homeFirstPlayerId;
+            } else if (action.playerId === homeSecondPlayerId) {
+              mappedPlayerId = homeSecondPlayerId;
+            }
+          }
+        }
+        
+        // CRITICAL: Verify mapped ID is a home player
+        if (mappedPlayerId && mappedPlayerId !== homeFirstPlayerId && mappedPlayerId !== homeSecondPlayerId) {
+          console.warn('Invalid mapping - home action mapped to non-home player:', {
+            actionPlayerId: action.playerId,
+            team: action.team,
+            mappedPlayerId,
+            homeFirstPlayerId,
+            homeSecondPlayerId,
+            indexInHomeArray
+          });
+          return;
+        }
+      } else if (action.team === 'away') {
+        // For away team, map based on position in awayPlayerIdsArray
+        const indexInAwayArray = awayPlayerIdsArray.indexOf(action.playerId);
+        if (indexInAwayArray === 0 && awayFirstPlayerId) {
+          mappedPlayerId = awayFirstPlayerId;
+        } else if (indexInAwayArray === 1 && awaySecondPlayerId) {
+          mappedPlayerId = awaySecondPlayerId;
+        } else if (indexInAwayArray === -1) {
+          // Not found in array, try direct mapping
+          mappedPlayerId = playerIdMapping[action.playerId] || null;
+          // If still no mapping, check if it's already an away player ID
+          if (!mappedPlayerId) {
+            if (action.playerId === awayFirstPlayerId) {
+              mappedPlayerId = awayFirstPlayerId;
+            } else if (action.playerId === awaySecondPlayerId) {
+              mappedPlayerId = awaySecondPlayerId;
+            }
+          }
+        }
+        
+        // CRITICAL: Verify mapped ID is an away player
+        if (mappedPlayerId && mappedPlayerId !== awayFirstPlayerId && mappedPlayerId !== awaySecondPlayerId) {
+          console.warn('Invalid mapping - away action mapped to non-away player:', {
+            actionPlayerId: action.playerId,
+            team: action.team,
+            mappedPlayerId,
+            awayFirstPlayerId,
+            awaySecondPlayerId,
+            indexInAwayArray
+          });
+          return;
+        }
+      }
+      
+      // Only count stats if we have a valid mapped player ID and it exists in playerStats
+      if (!mappedPlayerId || !playerStats[mappedPlayerId]) {
+        console.warn('Skipping action - no valid player ID mapping:', {
+          actionPlayerId: action.playerId,
+          team: action.team,
+          mappedPlayerId,
+          availablePlayerIds: Object.keys(playerStats),
+          homePlayerIdsArray,
+          awayPlayerIdsArray
+        });
+        return;
+      }
+      
+      playerStats[mappedPlayerId].throws++;
+      if (action.type === 'hit') {
+        playerStats[mappedPlayerId].hits++;
+      }
+    });
+    
+    // Debug log final stats
+    console.log('Final Player Stats:', playerStats);
 
     // Calculate hit rates
     Object.keys(playerStats).forEach(playerId => {
@@ -123,9 +279,12 @@ export default function LiveEventOverlayPage() {
     if (nextMatch.type === '1on1') {
       gameHistory.forEach((action: any) => {
         if (!action.playerId || !action.team) return;
-        teamStats1v1[action.team].throws++;
-        if (action.type === 'hit') {
-          teamStats1v1[action.team].hits++;
+        const team = action.team as 'home' | 'away';
+        if (team === 'home' || team === 'away') {
+          teamStats1v1[team].throws++;
+          if (action.type === 'hit') {
+            teamStats1v1[team].hits++;
+          }
         }
       });
       
@@ -181,19 +340,43 @@ export default function LiveEventOverlayPage() {
       homePlayers.push({ id: homeId, name: nextMatch.homePlayerName || 'Home Player' });
       awayPlayers.push({ id: awayId, name: nextMatch.awayPlayerName || 'Away Player' });
     } else {
-      const homeFirstId = selectedPlayers.homeFirst || gameState.homeFirstPlayer || 'home1';
-      const homeSecondId = selectedPlayers.homeSecond || gameState.homeSecondPlayer || 'home2';
-      const awayFirstId = selectedPlayers.awayFirst || gameState.awayFirstPlayer || 'away1';
-      const awaySecondId = selectedPlayers.awaySecond || gameState.awaySecondPlayer || 'away2';
+      // For 2v2, use player IDs from gameState (they are the source of truth)
+      // These should match the IDs we used in playerStats calculation above
+      const homeFirstId = gameState.homeFirstPlayer || selectedPlayers.homeFirst;
+      const homeSecondId = gameState.homeSecondPlayer || selectedPlayers.homeSecond;
+      const awayFirstId = gameState.awayFirstPlayer || selectedPlayers.awayFirst;
+      const awaySecondId = gameState.awaySecondPlayer || selectedPlayers.awaySecond;
+      
+      // Use the same IDs we used for playerStats - these are the source of truth
+      // If they're missing, we can't display stats correctly, so use fallbacks
+      // Note: These should match the format used in throw-tracker.tsx: home-player-0, home-player-1, etc.
+      const finalHomeFirstId = homeFirstId || 'home-player-0';
+      const finalHomeSecondId = homeSecondId || 'home-player-1';
+      const finalAwayFirstId = awayFirstId || 'away-player-0';
+      const finalAwaySecondId = awaySecondId || 'away-player-1';
       
       homePlayers.push(
-        { id: homeFirstId, name: nextMatch.homePlayer1Name || 'Home Player 1' },
-        { id: homeSecondId, name: nextMatch.homePlayer2Name || 'Home Player 2' }
+        { id: finalHomeFirstId, name: nextMatch.homePlayer1Name || 'Home Player 1' },
+        { id: finalHomeSecondId, name: nextMatch.homePlayer2Name || 'Home Player 2' }
       );
       awayPlayers.push(
-        { id: awayFirstId, name: nextMatch.awayPlayer1Name || 'Away Player 1' },
-        { id: awaySecondId, name: nextMatch.awayPlayer2Name || 'Away Player 2' }
+        { id: finalAwayFirstId, name: nextMatch.awayPlayer1Name || 'Away Player 1' },
+        { id: finalAwaySecondId, name: nextMatch.awayPlayer2Name || 'Away Player 2' }
       );
+      
+      // Debug: Log player IDs to verify they are correct
+      console.log('2v2 Player IDs for display:', {
+        home: { first: finalHomeFirstId, second: finalHomeSecondId },
+        away: { first: finalAwayFirstId, second: finalAwaySecondId },
+        playerStatsKeys: Object.keys(playerStats),
+        playerStatsValues: playerStats,
+        gameState: {
+          homeFirst: gameState.homeFirstPlayer,
+          homeSecond: gameState.homeSecondPlayer,
+          awayFirst: gameState.awayFirstPlayer,
+          awaySecond: gameState.awaySecondPlayer
+        }
+      });
     }
 
     // Calculate team hit rates
@@ -211,13 +394,18 @@ export default function LiveEventOverlayPage() {
       return acc;
     }, { throws: 0, hits: 0 });
 
-    const homeTeamHitRate = homeTeamStats.throws > 0 
-      ? Math.round((homeTeamStats.hits / homeTeamStats.throws) * 100) 
-      : 0;
+    // For 1v1, use teamStats1v1; for 2v2, use homeTeamStats/awayTeamStats
+    const homeTeamHitRate = nextMatch.type === '1on1' 
+      ? (teamStats1v1.home.hitRate || 0)
+      : (homeTeamStats.throws > 0 
+          ? Math.round((homeTeamStats.hits / homeTeamStats.throws) * 100) 
+          : 0);
     
-    const awayTeamHitRate = awayTeamStats.throws > 0 
-      ? Math.round((awayTeamStats.hits / awayTeamStats.throws) * 100) 
-      : 0;
+    const awayTeamHitRate = nextMatch.type === '1on1'
+      ? (teamStats1v1.away.hitRate || 0)
+      : (awayTeamStats.throws > 0 
+          ? Math.round((awayTeamStats.hits / awayTeamStats.throws) * 100) 
+          : 0);
 
     // Get match wins and current game from gameState
     const matchWins = gameState.matchWins || { home: 0, away: 0 };
@@ -520,9 +708,23 @@ export default function LiveEventOverlayPage() {
                   <div className="flex flex-col gap-1.5">
                     {trackingStats.homePlayers.filter(p => p.id).map((player, idx) => {
                       const stats = player.id && trackingStats.playerStats ? (trackingStats.playerStats[player.id] || null) : null;
-                      const aggregateStats = nextMatch.bestOf && nextMatch.bestOf > 1 && player.id && trackingStats.aggregatePlayerStats 
+                      // Only show aggregate stats if there are previous completed games
+                      const hasPreviousGames = trackingStats.matchWins && (trackingStats.matchWins.home > 0 || trackingStats.matchWins.away > 0) || (trackingStats.currentGame && trackingStats.currentGame > 1);
+                      const aggregateStats = nextMatch.bestOf && nextMatch.bestOf > 1 && hasPreviousGames && player.id && trackingStats.aggregatePlayerStats 
                         ? (trackingStats.aggregatePlayerStats[player.id] || null) 
                         : null;
+                      
+                      // Debug log for home players
+                      if (idx === 0) {
+                        console.log('Home Player 1 Stats:', {
+                          playerId: player.id,
+                          playerName: player.name,
+                          stats,
+                          allPlayerStats: trackingStats.playerStats,
+                          allPlayerStatsKeys: trackingStats.playerStats ? Object.keys(trackingStats.playerStats) : []
+                        });
+                      }
+                      
                       return (
                         <div key={idx} className="flex flex-col gap-0.5">
                           <div className="flex items-center gap-3 text-sm">
@@ -623,9 +825,23 @@ export default function LiveEventOverlayPage() {
                   <div className="flex flex-col gap-1.5">
                     {trackingStats.awayPlayers.filter(p => p.id).map((player, idx) => {
                       const stats = player.id && trackingStats.playerStats ? (trackingStats.playerStats[player.id] || null) : null;
-                      const aggregateStats = nextMatch.bestOf && nextMatch.bestOf > 1 && player.id && trackingStats.aggregatePlayerStats 
+                      // Only show aggregate stats if there are previous completed games
+                      const hasPreviousGames = trackingStats.matchWins && (trackingStats.matchWins.home > 0 || trackingStats.matchWins.away > 0) || (trackingStats.currentGame && trackingStats.currentGame > 1);
+                      const aggregateStats = nextMatch.bestOf && nextMatch.bestOf > 1 && hasPreviousGames && player.id && trackingStats.aggregatePlayerStats 
                         ? (trackingStats.aggregatePlayerStats[player.id] || null) 
                         : null;
+                      
+                      // Debug log for away players
+                      if (idx === 0) {
+                        console.log('Away Player 1 Stats:', {
+                          playerId: player.id,
+                          playerName: player.name,
+                          stats,
+                          allPlayerStats: trackingStats.playerStats,
+                          allPlayerStatsKeys: trackingStats.playerStats ? Object.keys(trackingStats.playerStats) : []
+                        });
+                      }
+                      
                       return (
                         <div key={idx} className="flex flex-col gap-0.5 items-end">
                           <div className="flex items-center gap-3 text-sm justify-end">

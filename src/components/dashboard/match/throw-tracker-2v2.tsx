@@ -284,7 +284,8 @@ export function ThrowTracker2v2({ homePlayers, awayPlayers, matchId, bestOf = 1,
             {
               gameNumber: prev.currentGame,
               winner: null,
-              startingTeam
+              startingTeam,
+              gameHistory: [] as GameAction[]
             }
           ];
       

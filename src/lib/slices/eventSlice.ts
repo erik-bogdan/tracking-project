@@ -41,7 +41,7 @@ export const createEvent = createAsyncThunk(
   'event/createEvent',
   async (payload: CreateEventPayload, { rejectWithValue }) => {
     try {
-      const result = await api.event.create.post(payload);
+      const result = await (api as any).event.create.post(payload);
       if (result.data && !result.data.success) {
         return rejectWithValue(result.data.error || 'Failed to create event');
       }
@@ -66,7 +66,7 @@ export const fetchEvents = createAsyncThunk(
   'event/fetchEvents',
   async (_, { rejectWithValue }) => {
     try {
-      const result = await api.event.list.get();
+      const result = await (api as any).event.list.get();
       if (result.data && !result.data.success) {
         return rejectWithValue(result.data.error || 'Failed to fetch events');
       }
@@ -88,7 +88,7 @@ export const fetchEvent = createAsyncThunk(
   'event/fetchEvent',
   async (eventId: string, { rejectWithValue }) => {
     try {
-      const result = await api.event[eventId].get();
+      const result = await (api as any).event[eventId].get();
       if (result.data && !result.data.success) {
         return rejectWithValue(result.data.error || 'Failed to fetch event');
       }
@@ -113,7 +113,7 @@ export const updateEvent = createAsyncThunk(
   'event/updateEvent',
   async (payload: { id: string; data: CreateEventPayload }, { rejectWithValue }) => {
     try {
-      const result = await api.event[payload.id].put(payload.data);
+      const result = await (api as any).event[payload.id].put(payload.data);
       if (result.data && !result.data.success) {
         return rejectWithValue(result.data.error || 'Failed to update event');
       }
@@ -151,14 +151,8 @@ const eventSlice = createSlice({
       })
       .addCase(createEvent.fulfilled, (state, action: PayloadAction<any>) => {
         state.isLoading = false;
-        // Convert date fields to ISO strings for serialization
-        const event = {
-          ...action.payload,
-          date: action.payload.date instanceof Date ? action.payload.date.toISOString() : action.payload.date,
-          createdAt: action.payload.createdAt instanceof Date ? action.payload.createdAt.toISOString() : action.payload.createdAt,
-          updatedAt: action.payload.updatedAt instanceof Date ? action.payload.updatedAt.toISOString() : action.payload.updatedAt,
-        };
-        state.events.push(event);
+        // Date fields are already strings from the thunk
+        state.events.push(action.payload);
       })
       .addCase(createEvent.rejected, (state, action) => {
         state.isLoading = false;

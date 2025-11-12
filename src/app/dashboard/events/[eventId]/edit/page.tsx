@@ -70,26 +70,27 @@ export default function EditEventPage() {
     setValue,
     formState: { errors },
     reset,
-  } = useForm<EventFormData>({
+  } = useForm({
     resolver: zodResolver(eventSchema),
     defaultValues: {
       showTwitchChat: false,
-      type: "1on1",
+      type: "1on1" as const,
     },
   });
 
   // Load event data into form when event is available
   useEffect(() => {
     if (event) {
-      reset({
+      const formData: EventFormData = {
         name: event.name,
         type: event.type,
         dateTime: event.date,
         location: event.location || "",
-        showTwitchChat: event.showTwitchChat || false,
+        showTwitchChat: event.showTwitchChat ?? false,
         twitchChatApiKey: event.twitchChatApiKey || "",
         layoutImage: event.layoutImage || "",
-      });
+      };
+      reset(formData);
       if (event.layoutImage) {
         setImagePreview(event.layoutImage);
       }
@@ -105,7 +106,7 @@ export default function EditEventPage() {
       setUploadingImage(true);
       try {
         // Upload file first
-        const result = await api.upload.image.post({ file });
+        const result = await (api as any).upload.image.post({ file });
         
         if (result.data?.success && result.data.data) {
           const imageUrl = result.data.data.url;

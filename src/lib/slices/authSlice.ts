@@ -68,8 +68,8 @@ export const signUpEmail = createAsyncThunk(
       // Update user with organizationName after signup
       if (organizationName) {
         try {
-          await authClient.updateUser({
-            organizationName: organizationName as any, // Cast to any as it's an additionalField
+          await (authClient.updateUser as any)({
+            organizationName: organizationName,
           });
         } catch (updateError) {
           console.warn('Failed to update organizationName:', updateError);

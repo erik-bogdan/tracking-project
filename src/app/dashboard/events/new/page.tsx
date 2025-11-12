@@ -56,11 +56,11 @@ export default function NewEventPage() {
     watch,
     setValue,
     formState: { errors },
-  } = useForm<EventFormData>({
+  } = useForm({
     resolver: zodResolver(eventSchema),
     defaultValues: {
       showTwitchChat: false,
-      type: "1on1",
+      type: "1on1" as const,
     },
   });
 
@@ -73,7 +73,7 @@ export default function NewEventPage() {
       setUploadingImage(true);
       try {
         // Upload file first
-        const result = await api.upload.image.post({ file });
+        const result = await (api as any).upload.image.post({ file });
         
         if (result.data?.success && result.data.data) {
           const imageUrl = result.data.data.url;
