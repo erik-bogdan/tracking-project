@@ -2,7 +2,7 @@ module.exports = {
     apps: [
       {
         name      : 'tracking',
-        cwd       : '/var/www/html/tracking',
+        cwd       : '/home/tracking',
         script    : 'bun',
         args      : ['run', 'start', '-p', '3666'],
         env: {
