@@ -6,7 +6,7 @@ import { db } from "./db";
 
 export const auth = betterAuth({
     //baseURL: 'http://localhost:3000',
-    trustedOrigins: ['http://localhost:3000', 'http://localhost:3001', "https://bpongcl.local:3001", "https://beta.bpong-cl.com", "https://bpong-cl.com","https://gorgeous-porpoise-kindly.ngrok-free.app"],
+    trustedOrigins: ['http://localhost:3000', 'http://localhost:3001', "https://bpongcl.local:3001", "https://beta.bpong-cl.com", "https://bpong-cl.com","https://gorgeous-porpoise-kindly.ngrok-free.app", "https://tracker.bpong.hu"],
     database: drizzleAdapter(db, {
         schema,
         provider: "pg", // or "mysql", "postgresql", ...etc
