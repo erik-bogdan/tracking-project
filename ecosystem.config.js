@@ -3,7 +3,7 @@ module.exports = {
       {
         name      : 'tracking',
         cwd       : '/var/www/html/tracking',
-        script    : 'pnpm',
+        script    : 'bun',
         args      : ['run', 'start', '-p', '3666'],
         env: {
           NODE_ENV: 'production',
